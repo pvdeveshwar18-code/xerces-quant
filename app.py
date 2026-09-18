@@ -102,6 +102,18 @@ def _cached_forecast_bundle(ticker: str, period: str, steps: int, holdout: int =
 def run_backtest(df: pd.DataFrame, strategy: str):
     bt = df.copy().reset_index(drop=True)
     bt["Signal_BT"] = 0
+
+    if strategy == "Institutional Confluence (Volume + ATR Stops)":
+        from analytics.confluence import run_institutional_confluence_backtest
+        bt_res, trades, summary = run_institutional_confluence_backtest(bt)
+        buy_x = [t["Entry Date"] for t in trades]
+        buy_y = [t["Entry ₹"] for t in trades]
+        sell_x = [t["Exit Date"] for t in trades]
+        sell_y = [t["Exit ₹"] for t in trades]
+        return bt_res, trades, buy_x, buy_y, sell_x, sell_y
+
+    from analytics.friction import calculate_indian_equity_friction
+
     if strategy == "SMA Crossover":
         valid = bt["SMA_20"].notna() & bt["SMA_50"].notna()
         bt.loc[valid & (bt["SMA_20"] > bt["SMA_50"]), "Signal_BT"] = 1
@@ -145,10 +157,19 @@ def run_backtest(df: pd.DataFrame, strategy: str):
             nxt = bt.iloc[idx + 1]
             in_trade = False
             exit_p   = float(nxt["Open"])
-            pnl      = (exit_p - entry_price) / entry_price * 100
-            trades.append({"Entry Date": str(entry_date)[:10], "Exit Date": str(nxt["Date"])[:10],
-                           "Entry ₹": round(entry_price,2), "Exit ₹": round(exit_p,2),
-                           "P&L %": round(pnl,2), "Result": "✅ WIN" if pnl > 0 else "❌ LOSS"})
+            fric = calculate_indian_equity_friction(entry_price, exit_p, quantity=100)
+            trades.append({
+                "Entry Date": str(entry_date)[:10],
+                "Exit Date": str(nxt["Date"])[:10],
+                "Entry ₹": round(entry_price, 2),
+                "Exit ₹": round(exit_p, 2),
+                "Gross P&L %": fric["gross_pnl_pct"],
+                "Friction & Tax ₹": fric["total_friction"],
+                "Net P&L %": fric["net_pnl_pct"],
+                "P&L %": fric["net_pnl_pct"],
+                "Reason": "Indicator Signal Flip",
+                "Result": "✅ WIN" if fric["net_pnl"] > 0 else "❌ LOSS"
+            })
             sell_x.append(nxt["Date"])
             sell_y.append(float(nxt["High"]) * 1.015 if pd.notna(nxt.get("High")) else float(nxt["Open"]))
     return bt, trades, buy_x, buy_y, sell_x, sell_y
@@ -224,7 +245,13 @@ with st.sidebar:
     show_vol  = st.checkbox("Volume bars", value=True)
     st.markdown("---")
     st.markdown("<p class='telemetry-tag' style='color:#00c8ff;font-weight:700;margin-bottom:5px;'>[ 📈 BACKTEST STRATEGY ]</p>", unsafe_allow_html=True)
-    backtest_strategy = st.selectbox("Strategy", ["SMA Crossover","RSI Mean Reversion","Bollinger Bands Breakout","MACD Crossover"])
+    backtest_strategy = st.selectbox("Strategy", [
+        "Institutional Confluence (Volume + ATR Stops)",
+        "SMA Crossover",
+        "RSI Mean Reversion",
+        "Bollinger Bands Breakout",
+        "MACD Crossover"
+    ])
     st.markdown("---")
 
     # Watchlist Sidebar
