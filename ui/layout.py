@@ -9,6 +9,12 @@ INDEX_META_INDIA = [
     ("^CNXSC","NIFTY SMALLCAP","#7c6ef8"), ("^INDIAVIX","INDIA VIX","#ff3355"),
 ]
 
+INDEX_META_COMMODITIES = [
+    ("GC=F","GOLD (COMEX/MCX)","#ffcc00"), ("SI=F","SILVER (COMEX/MCX)","#00c8ff"),
+    ("CL=F","CRUDE OIL (WTI)","#ff6b35"),  ("BZ=F","BRENT CRUDE","#ff3355"),
+    ("NG=F","NATURAL GAS","#00e87a"),       ("HG=F","COPPER","#7c6ef8"),
+]
+
 INDEX_META_US = [
     ("^GSPC","S&P 500","#00e87a"), ("^IXIC","NASDAQ","#00c8ff"),
     ("^DJI","DOW JONES","#ffcc00"), ("^RUT","RUSSELL 2000","#ff6b35"),
@@ -20,10 +26,15 @@ def render_header(now_dt, status_text: str, status_color: str, market_mode: str 
     col_title, col_clock = st.columns([2, 1])
     with col_title:
         st.markdown('<h1 class="xerces-title">XERCES // QUANT ENGINE</h1>', unsafe_allow_html=True)
-        universe_text = "NSE/BSE UNIVERSE: 600+ STOCKS" if "Indian" in market_mode else "US UNIVERSE: NASDAQ & NYSE TOP STOCKS"
+        if "Commodities" in market_mode:
+            universe_text = "COMMODITIES UNIVERSE: GOLD, SILVER, CRUDE OIL, NATGAS & METALS"
+        elif "Indian" in market_mode:
+            universe_text = "NSE/BSE UNIVERSE: 600+ STOCKS"
+        else:
+            universe_text = "US UNIVERSE: NASDAQ & NYSE TOP STOCKS"
         st.markdown(f'<p class="telemetry-tag">[ {universe_text} // ARIMA + TECHNICAL + PORTFOLIO + VIBE QUANT ENGINE // GODMODE ]</p>', unsafe_allow_html=True)
     with col_clock:
-        tz_label = "IST" if "Indian" in market_mode else "EST"
+        tz_label = "IST" if ("Indian" in market_mode or "Commodities" in market_mode) else "EST"
         st.markdown(f"""
         <div style="text-align:right;font-family:'Space Mono',monospace;font-size:11px;color:#6a90aa;
                     background:rgba(7,18,32,0.5);padding:8px;border-radius:4px;border:1px solid rgba(0,200,255,0.08);">
@@ -38,7 +49,12 @@ def render_global_search(market_mode: str = "🇮🇳 Indian Market (NSE/BSE)") 
     """Render the global search bar with Market Selector. Returns search query."""
     st.markdown("<div style='background:rgba(7,18,32,0.45);border:1px solid rgba(0,200,255,0.12);padding:10px 16px;border-radius:6px;margin-bottom:12px;'>", unsafe_allow_html=True)
     sc1, sc2 = st.columns([5, 1])
-    placeholder_txt = "Search Indian stock — Reliance, TCS, SBIN, INFY..." if "Indian" in market_mode else "Search US stock — NVDA, AAPL, MSFT, TSLA, SPY..."
+    if "Commodities" in market_mode:
+        placeholder_txt = "Search Commodity — GOLD, SILVER, CRUDEOIL, NATURALGAS, COPPER..."
+    elif "Indian" in market_mode:
+        placeholder_txt = "Search Indian stock — Reliance, TCS, SBIN, INFY..."
+    else:
+        placeholder_txt = "Search US stock — NVDA, AAPL, MSFT, TSLA, SPY..."
     with sc1:
         search_raw = st.text_input("Search", value="", placeholder=placeholder_txt, label_visibility="collapsed")
     with sc2:
@@ -50,11 +66,20 @@ def render_global_search(market_mode: str = "🇮🇳 Indian Market (NSE/BSE)") 
 
 def render_dashboard_landing(idx_data: dict[str, pd.DataFrame], market_mode: str = "🇮🇳 Indian Market (NSE/BSE)"):
     """Render market dashboard landing page when no stock is searched."""
-    m_label = "INDIAN NSE/BSE" if "Indian" in market_mode else "US NASDAQ/NYSE"
+    if "Commodities" in market_mode:
+        m_label = "COMMODITIES (MCX / GLOBAL)"
+        INDEX_META = INDEX_META_COMMODITIES
+        currency_sym = "$"
+    elif "Indian" in market_mode:
+        m_label = "INDIAN NSE/BSE"
+        INDEX_META = INDEX_META_INDIA
+        currency_sym = "₹"
+    else:
+        m_label = "US NASDAQ/NYSE"
+        INDEX_META = INDEX_META_US
+        currency_sym = "$"
+
     st.markdown(f'<h2 class="xerces-title" style="font-size:1.5rem;margin-bottom:12px;">📊 LIVE {m_label} MARKET OVERVIEW</h2>', unsafe_allow_html=True)
-    
-    INDEX_META = INDEX_META_INDIA if "Indian" in market_mode else INDEX_META_US
-    currency_sym = "₹" if "Indian" in market_mode else "$"
     
     cols = st.columns(6)
     for col, (sym, name, clr) in zip(cols, INDEX_META):

@@ -250,6 +250,57 @@ SYMBOL_ALIASES = {
     "TATAMOTORS": "TMCV",
 }
 
+# ══════════════════════════════════════════════════════════════════════════════
+# COMMODITIES UNIVERSE (MCX & GLOBAL BENCHMARKS)
+# ══════════════════════════════════════════════════════════════════════════════
+COMMODITIES = {
+    "🥇 Precious Metals": [
+        ("Gold Continuous (MCX / COMEX)", "GC=F"),
+        ("Silver Continuous (MCX / COMEX)", "SI=F"),
+        ("Platinum", "PL=F"),
+        ("Palladium", "PA=F"),
+    ],
+    "🛢️ Energy Commodities": [
+        ("Crude Oil WTI (MCX Proxy)", "CL=F"),
+        ("Brent Crude Oil", "BZ=F"),
+        ("Natural Gas (MCX Proxy)", "NG=F"),
+        ("Heating Oil", "HO=F"),
+    ],
+    "🏗️ Industrial Metals": [
+        ("Copper Continuous (MCX Proxy)", "HG=F"),
+        ("Aluminum Cash", "ALI=F"),
+    ],
+    "🌾 Agri Commodities": [
+        ("Corn", "ZC=F"),
+        ("Soybeans", "ZS=F"),
+        ("Wheat", "ZW=F"),
+        ("Sugar #11", "SB=F"),
+        ("Coffee", "KC=F"),
+        ("Cotton #2", "CT=F"),
+    ]
+}
+
+COMMODITY_ALIASES = {
+    "GOLD": "GC=F",
+    "SILVER": "SI=F",
+    "CRUDEOIL": "CL=F",
+    "CRUDE": "CL=F",
+    "OIL": "CL=F",
+    "BRENT": "BZ=F",
+    "NATURALGAS": "NG=F",
+    "NATGAS": "NG=F",
+    "COPPER": "HG=F",
+    "PLATINUM": "PL=F",
+    "PALLADIUM": "PA=F",
+    "ALUMINUM": "ALI=F",
+    "CORN": "ZC=F",
+    "WHEAT": "ZW=F",
+    "SOYBEAN": "ZS=F",
+    "SUGAR": "SB=F",
+    "COFFEE": "KC=F",
+    "COTTON": "CT=F",
+}
+
 US_STOCKS_SET = {
     "NVDA", "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "AMD", "AVGO", "INTC",
     "QCOM", "PLTR", "SPY", "QQQ", "BTC-USD", "ETH-USD", "COIN", "NFLX", "DIS", "BA",
@@ -258,6 +309,10 @@ US_STOCKS_SET = {
 
 def resolve_ticker(ticker_input: str, market_mode: str = "Indian Market") -> str:
     ticker_input = ticker_input.strip().upper()
+    if ticker_input in COMMODITY_ALIASES:
+        return COMMODITY_ALIASES[ticker_input]
+    if ticker_input.endswith("=F"):
+        return ticker_input
     if ticker_input.endswith(".NS") or ticker_input.endswith(".BO") or "^" in ticker_input or "-" in ticker_input:
         base = ticker_input.replace(".NS", "").replace(".BO", "")
         if base in SYMBOL_ALIASES:
@@ -339,7 +394,9 @@ def _download_raw(ticker: str, period: str = "1y") -> pd.DataFrame | None:
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def load_indices(market_mode: str = "Indian Market") -> dict[str, pd.DataFrame]:
-    if "US" in market_mode:
+    if "Commodities" in market_mode:
+        tickers = ["GC=F", "SI=F", "CL=F", "BZ=F", "NG=F", "HG=F"]
+    elif "US" in market_mode:
         tickers = ["^GSPC","^IXIC","^DJI","^RUT","BTC-USD","^VIX"]
     else:
         tickers = ["^NSEI","^NSEBANK","^BSESN","^CRSMID","^CNXSC","^INDIAVIX"]

@@ -7,6 +7,7 @@ import streamlit as st
 import pandas as pd
 from brokers.executor import execute_order, SUPPORTED_BROKERS
 from brokers.kotak_neo import KotakNeoAdapter
+from brokers.kotak_neo_streamer import KotakNeoStreamer
 
 def render_brokers_tab(selected_name: str, selected_ticker: str, close: float):
     """Render dedicated Brokers & 1-Click Execution Tab."""
@@ -41,7 +42,55 @@ def render_brokers_tab(selected_name: str, selected_ticker: str, close: float):
             st.success("✅ Kotak Neo API Session Connected Successfully!")
 
         if st.session_state.get("neo_connected"):
-            st.markdown('<div class="glass-card" style="border-left:4px solid #00e87a;"><p class="glass-label">CONNECTION STATUS</p><div style="color:#00e87a;font-family:\'Space Mono\',monospace;font-weight:700;">🟢 KOTAK NEO CONNECTED & READY</div></div>', unsafe_allow_html=True)
+            st.markdown(
+                """
+<div class=\"glass-card\" style=\"border-left:4px solid #00e87a;\">
+<p class=\"glass-label\">CONNECTION STATUS</p>
+<div style=\"color:#00e87a;font-family:'Space Mono',monospace;font-weight:700;\">🟢 KOTAK NEO CONNECTED & READY</div>
+</div>
+""",
+                unsafe_allow_html=True,
+            )
+
+            # Live Streamer Controls
+            if 'kotak_streamer' not in st.session_state:
+                st.session_state['kotak_streamer'] = None
+
+            def _handle_live_candle(candle: dict):
+                candles = st.session_state.get('live_candles', [])
+                candles.append(candle)
+                st.session_state['live_candles'] = candles
+                st.info(
+                    f"Live Candle – Time: {candle.get('time', 'N/A')}, Open: {candle.get('open')}, "
+                    f"High: {candle.get('high')}, Low: {candle.get('low')}, Close: {candle.get('close')}"
+                )
+
+            if st.session_state.get('neo_connected'):
+                col_start, col_stop = st.columns([1, 1])
+                with col_start:
+                    if st.button('▶️ Start Live Stream', key='start_stream'):
+                        if st.session_state['kotak_streamer'] is None:
+                            streamer = KotakNeoStreamer(
+                                api_key=neo_key,
+                                api_secret=neo_secret,
+                                symbols=[selected_ticker],
+                                on_candle=_handle_live_candle,
+                                on_depth=None,
+                            )
+                            streamer.connect()
+                            streamer.run()
+                            st.session_state['kotak_streamer'] = streamer
+                            st.success('Live stream started for ' + selected_ticker)
+                        else:
+                            st.warning('Streamer already running.')
+                with col_stop:
+                    if st.button('⏹ Stop Live Stream', key='stop_stream'):
+                        if st.session_state['kotak_streamer'] is not None:
+                            st.session_state['kotak_streamer'].stop()
+                            st.session_state['kotak_streamer'] = None
+                            st.success('Live stream stopped.')
+                        else:
+                            st.info('No active streamer to stop.')
 
     with b_tab2:
         st.markdown("**Zerodha Kite Connect Configuration**")

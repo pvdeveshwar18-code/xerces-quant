@@ -7,7 +7,7 @@ import streamlit as st
 import forecast_engine as fe
 import xerces_plus as xp
 from data.loader import (
-    SECTORS, ALL_STOCKS, SYMBOL_ALIASES, resolve_ticker, get_sector_peers,
+    SECTORS, ALL_STOCKS, SYMBOL_ALIASES, COMMODITIES, COMMODITY_ALIASES, resolve_ticker, get_sector_peers,
     load_ohlcv, load_indices, fetch_news, fetch_fii_dii, parse_fii_dii,
     fetch_options_chain, parse_options_chain, fetch_fundamentals, load_intraday
 )
@@ -78,15 +78,26 @@ def get_market_now(market_mode: str = "Indian Market"):
 
 def market_status(market_mode: str = "Indian Market"):
     now = get_market_now(market_mode)
-    m_name = "NYSE" if "US" in market_mode else "NSE"
+    if "US" in market_mode:
+        m_name = "NYSE"
+    elif "Commodities" in market_mode:
+        m_name = "MCX / COMEX"
+    else:
+        m_name = "NSE"
+
     if now.weekday() >= 5:
         return f"🔴 {m_name} CLOSED", "#ff3355"
+
     if "US" in market_mode:
         ot = now.replace(hour=9, minute=30, second=0, microsecond=0)
         ct = now.replace(hour=16, minute=0, second=0, microsecond=0)
+    elif "Commodities" in market_mode:
+        ot = now.replace(hour=9, minute=0, second=0, microsecond=0)
+        ct = now.replace(hour=23, minute=30, second=0, microsecond=0)
     else:
         ot = now.replace(hour=9, minute=15, second=0, microsecond=0)
         ct = now.replace(hour=15, minute=30, second=0, microsecond=0)
+
     if ot <= now <= ct:
         return f"🟢 {m_name} OPEN", "#00e87a"
     return f"🔴 {m_name} CLOSED", "#ff3355"
@@ -106,6 +117,15 @@ def run_backtest(df: pd.DataFrame, strategy: str):
     if strategy == "Institutional Confluence (Volume + ATR Stops)":
         from analytics.confluence import run_institutional_confluence_backtest
         bt_res, trades, summary = run_institutional_confluence_backtest(bt)
+        buy_x = [t["Entry Date"] for t in trades]
+        buy_y = [t["Entry ₹"] for t in trades]
+        sell_x = [t["Exit Date"] for t in trades]
+        sell_y = [t["Exit ₹"] for t in trades]
+        return bt_res, trades, buy_x, buy_y, sell_x, sell_y
+
+    if strategy == "PB EMA (Pullback to 20 EMA)":
+        from analytics.pullback_ema import run_pullback_ema_backtest
+        bt_res, trades, summary = run_pullback_ema_backtest(bt)
         buy_x = [t["Entry Date"] for t in trades]
         buy_y = [t["Entry ₹"] for t in trades]
         sell_x = [t["Exit Date"] for t in trades]
@@ -198,27 +218,53 @@ search_raw = render_global_search(market_mode=market_mode)
 
 # Ticker Resolution
 search = search_raw.strip()
-default_index_sym = "^NSEI" if "Indian" in market_mode else "^GSPC"
-default_index_name = "NIFTY 50" if "Indian" in market_mode else "S&P 500"
+if "Commodities" in market_mode:
+    default_index_sym = "GC=F"
+    default_index_name = "GOLD (Continuous Futures)"
+elif "US" in market_mode:
+    default_index_sym = "^GSPC"
+    default_index_name = "S&P 500"
+else:
+    default_index_sym = "^NSEI"
+    default_index_name = "NIFTY 50"
+
 selected_ticker, selected_name, is_dashboard = default_index_sym, default_index_name, True
 
 if search:
     is_dashboard = False
     match_t, match_n = None, None
     sl = search.lower()
-    for label, ticker in ALL_STOCKS.items():
-        if sl in label.lower():
-            match_t, match_n = ticker, label.split(" (")[0]; break
+    su = search.upper()
+
+    # 1. Check commodities
+    if su in COMMODITY_ALIASES:
+        match_t = COMMODITY_ALIASES[su]
+        match_n = f"{su} Futures"
+    else:
+        for cat, items in COMMODITIES.items():
+            for c_name, c_sym in items:
+                if sl in c_name.lower() or su == c_sym.upper():
+                    match_t, match_n = c_sym, c_name
+                    break
+            if match_t:
+                break
+
+    # 2. Check equities
     if not match_t:
         for label, ticker in ALL_STOCKS.items():
-            sym = ticker.replace(".NS","").replace(".BO","")
-            if sl.upper() == sym or sl.upper() == ticker.upper():
+            if sl in label.lower():
                 match_t, match_n = ticker, label.split(" (")[0]; break
+        if not match_t:
+            for label, ticker in ALL_STOCKS.items():
+                sym = ticker.replace(".NS","").replace(".BO","")
+                if sl.upper() == sym or sl.upper() == ticker.upper():
+                    match_t, match_n = ticker, label.split(" (")[0]; break
+
     if match_t:
         selected_ticker, selected_name = match_t, match_n
     else:
         selected_ticker = resolve_ticker(search, market_mode=market_mode)
-        selected_name   = search.upper().replace(".NS","").replace(".BO","")
+        selected_name   = search.upper().replace(".NS","").replace(".BO","").replace("=F","")
 
 # Dashboard Landing Page
 if is_dashboard:
@@ -232,7 +278,7 @@ if is_dashboard:
 # ══════════════════════════════════════════════════════════════════════════════
 with st.sidebar:
     st.markdown("<p class='telemetry-tag' style='color:#00c8ff;font-weight:700;margin-bottom:5px;'>[ 🌍 TARGET MARKET ]</p>", unsafe_allow_html=True)
-    market_mode = st.radio("Active Market:", ["🇮🇳 Indian Market (NSE/BSE)", "🇺🇸 US Market (NASDAQ/NYSE)"], horizontal=True, key="global_market_mode")
+    market_mode = st.radio("Active Market:", ["🇮🇳 Indian Market (NSE/BSE)", "🛢️ Commodities (MCX / Global)", "🇺🇸 US Market (NASDAQ/NYSE)"], horizontal=True, key="global_market_mode")
     st.markdown("---")
     st.markdown("<p class='telemetry-tag' style='color:#00c8ff;font-weight:700;margin-bottom:5px;'>[ 🛡️ RISK CONTROLS ]</p>", unsafe_allow_html=True)
     allocated_capital = st.number_input("Capital Pool (₹)", min_value=1000, value=100000, step=5000)
@@ -247,6 +293,7 @@ with st.sidebar:
     st.markdown("<p class='telemetry-tag' style='color:#00c8ff;font-weight:700;margin-bottom:5px;'>[ 📈 BACKTEST STRATEGY ]</p>", unsafe_allow_html=True)
     backtest_strategy = st.selectbox("Strategy", [
         "Institutional Confluence (Volume + ATR Stops)",
+        "PB EMA (Pullback to 20 EMA)",
         "SMA Crossover",
         "RSI Mean Reversion",
         "Bollinger Bands Breakout",
