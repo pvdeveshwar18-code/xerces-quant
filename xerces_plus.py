@@ -157,19 +157,44 @@ def save_journal(df: pd.DataFrame):
     df.to_csv(JOURNAL_FILE, index=False)
 
 # ──────────────────────────────────────────────────────────────────────────
-# 4. AI ANALYST — emergentintegrations (Claude Sonnet 4.6)
+# 4. AI ANALYST — Cascade: Free Gemini (primary) → Emergent Claude (fallback)
 # ──────────────────────────────────────────────────────────────────────────
 def _get_llm_key() -> str:
-    """Read LLM key from env var first, then Streamlit secrets (for cloud deploys)."""
+    """Read Emergent LLM key from env var first, then Streamlit secrets."""
     key = os.environ.get("EMERGENT_LLM_KEY")
     if key:
         return key
     try:
         return st.secrets["EMERGENT_LLM_KEY"]
     except Exception:
-        return "sk-emergent-2191f894997De47509"
+        return ""
+
+def _get_gemini_key() -> str:
+    """Read Google Gemini API key (free tier). Returns empty string if not set."""
+    key = os.environ.get("GEMINI_API_KEY", "")
+    if key:
+        return key
+    try:
+        return st.secrets["GEMINI_API_KEY"]
+    except Exception:
+        return ""
 
 EMERGENT_LLM_KEY = _get_llm_key()
+GEMINI_API_KEY = _get_gemini_key()
+
+# Track which backend served the last response (surface in UI)
+_LAST_BACKEND = {"name": "none", "model": "none", "reason": ""}
+
+def get_last_backend() -> dict:
+    return dict(_LAST_BACKEND)
+
+def _is_quota_or_rate_error(err: Exception) -> bool:
+    """Detect Gemini quota/rate-limit errors so we can fall back."""
+    msg = str(err).lower()
+    return any(k in msg for k in [
+        "quota", "rate limit", "resource_exhausted", "429",
+        "exceeded", "daily limit", "too many requests"
+    ])
 
 def _run_async(coro):
     """Run an async coroutine from sync Streamlit code."""
@@ -206,36 +231,116 @@ def _build_context(ctx: dict) -> str:
             lines.append(f"  - {h}")
     return "\n".join(lines)
 
-async def _ai_chat_async(session_id: str, user_prompt: str, context: dict, model: str = "claude-sonnet-4-6"):
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
-    system_msg = (
-        "You are XERCES AI — a sharp, concise, data-driven Indian equity market analyst. "
-        "You explain technical signals, fundamentals, and news in plain English. "
-        "You give balanced views (bull case + bear case), acknowledge uncertainty, "
-        "and remind users this is analysis, not SEBI-registered advice. "
-        "Format: use short paragraphs, ₹ for prices, and bullet points for lists. "
-        "Never fabricate numbers — only use the provided context or user-supplied data."
+_SYSTEM_MSG = (
+    "You are XERCES AI — a sharp, concise, data-driven Indian equity market analyst. "
+    "You explain technical signals, fundamentals, and news in plain English. "
+    "You give balanced views (bull case + bear case), acknowledge uncertainty, "
+    "and remind users this is analysis, not SEBI-registered advice. "
+    "Format: use short paragraphs, ₹ for prices, and bullet points for lists. "
+    "Never fabricate numbers — only use the provided context or user-supplied data."
+)
+
+# ── Backend 1: Google Gemini (FREE tier) ──
+def _gemini_chat(session_id: str, user_prompt: str, context: dict, model_name: str = "gemini-2.5-flash") -> str:
+    """Direct Google Gemini call using free tier API key. Raises on quota."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("GEMINI_API_KEY not set")
+    from google import genai
+    from google.genai import types
+    client = genai.Client(api_key=GEMINI_API_KEY)
+    ctx_str = _build_context(context) if context else ""
+    full_prompt = (f"[LIVE CONTEXT]\n{ctx_str}\n\n[USER QUESTION]\n{user_prompt}"
+                   if ctx_str else user_prompt)
+    resp = client.models.generate_content(
+        model=model_name,
+        contents=full_prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=_SYSTEM_MSG,
+            temperature=0.7,
+        ),
     )
+    return resp.text or ""
+
+# ── Backend 2: Emergent (Claude Sonnet 4.6, PAID fallback) ──
+async def _emergent_chat_async(session_id: str, user_prompt: str, context: dict, model: str = "claude-sonnet-4-6") -> str:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
     provider = "anthropic" if model.startswith("claude") else ("gemini" if model.startswith("gemini") else "openai")
     chat = LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=session_id,
-        system_message=system_msg,
+        system_message=_SYSTEM_MSG,
     ).with_model(provider, model)
-
     ctx_str = _build_context(context) if context else ""
     full_prompt = (f"[LIVE CONTEXT]\n{ctx_str}\n\n[USER QUESTION]\n{user_prompt}"
                    if ctx_str else user_prompt)
     resp = await chat.send_message(UserMessage(text=full_prompt))
     return resp
 
-def ai_chat(session_id: str, user_prompt: str, context: dict = None, model: str = "claude-sonnet-4-6") -> str:
+def _emergent_chat(session_id: str, user_prompt: str, context: dict, model: str = "claude-sonnet-4-6") -> str:
+    return _run_async(_emergent_chat_async(session_id, user_prompt, context, model))
+
+# ── Cascade: Gemini → Emergent ──
+def ai_chat(session_id: str, user_prompt: str, context: dict = None, model: str = "auto") -> str:
+    """
+    model:
+      - 'auto' (default): try Gemini free first, fall back to Emergent Claude on quota
+      - 'gemini-2.5-flash' / 'gemini-2.5-pro': force Gemini
+      - 'claude-sonnet-4-6' / 'gpt-5.4' / 'gemini-3-flash-preview': force Emergent backend
+    """
+    ctx = context or {}
+    # Force-Emergent models (routed through Emergent LLM key)
+    if model.startswith(("claude", "gpt")) or model == "gemini-3-flash-preview":
+        try:
+            out = _emergent_chat(session_id, user_prompt, ctx, model)
+            _LAST_BACKEND.update({"name": "Emergent", "model": model, "reason": "forced"})
+            return out
+        except Exception as e:
+            _LAST_BACKEND.update({"name": "error", "model": model, "reason": str(e)})
+            return f"⚠️ AI Analyst error: {e}"
+
+    # Force-Gemini models
+    if model.startswith("gemini-2"):
+        try:
+            out = _gemini_chat(session_id, user_prompt, ctx, model)
+            _LAST_BACKEND.update({"name": "Gemini (FREE)", "model": model, "reason": "forced"})
+            return out
+        except Exception as e:
+            _LAST_BACKEND.update({"name": "error", "model": model, "reason": str(e)})
+            return f"⚠️ Gemini error: {e}"
+
+    # Auto cascade: Gemini free → Emergent Claude fallback
+    if GEMINI_API_KEY:
+        try:
+            out = _gemini_chat(session_id, user_prompt, ctx, "gemini-2.5-flash")
+            _LAST_BACKEND.update({"name": "Gemini (FREE)", "model": "gemini-2.5-flash", "reason": "primary"})
+            return out
+        except Exception as e:
+            if _is_quota_or_rate_error(e):
+                try:
+                    out = _emergent_chat(session_id, user_prompt, ctx, "claude-sonnet-4-6")
+                    _LAST_BACKEND.update({
+                        "name": "Emergent (backup)", "model": "claude-sonnet-4-6",
+                        "reason": f"Gemini quota exceeded → fallback"})
+                    return out
+                except Exception as e2:
+                    _LAST_BACKEND.update({"name": "error", "model": "both failed", "reason": f"{e} | {e2}"})
+                    return f"⚠️ Both backends failed. Gemini: {e}. Emergent: {e2}"
+            _LAST_BACKEND.update({"name": "error", "model": "gemini-2.5-flash", "reason": str(e)})
+            return f"⚠️ Gemini error (not quota): {e}"
+    # No Gemini key → straight to Emergent
+    if not EMERGENT_LLM_KEY:
+        _LAST_BACKEND.update({"name": "error", "model": "none", "reason": "no API keys configured"})
+        return "⚠️ AI Analyst unavailable. Set GEMINI_API_KEY or EMERGENT_LLM_KEY in environment or Streamlit secrets."
     try:
-        return _run_async(_ai_chat_async(session_id, user_prompt, context or {}, model))
+        out = _emergent_chat(session_id, user_prompt, ctx, "claude-sonnet-4-6")
+        _LAST_BACKEND.update({"name": "Emergent", "model": "claude-sonnet-4-6",
+                              "reason": "no GEMINI_API_KEY set"})
+        return out
     except Exception as e:
+        _LAST_BACKEND.update({"name": "error", "model": "emergent", "reason": str(e)})
         return f"⚠️ AI Analyst error: {e}"
 
-def ai_summarize_news(headlines: list, ticker: str, model: str = "claude-sonnet-4-6") -> str:
+def ai_summarize_news(headlines: list, ticker: str, model: str = "auto") -> str:
     if not headlines:
         return "No headlines to summarize."
     joined = "\n".join(f"- {h}" for h in headlines[:15])
@@ -247,7 +352,7 @@ def ai_summarize_news(headlines: list, ticker: str, model: str = "claude-sonnet-
     )
     return ai_chat(f"news_{ticker}", prompt, context={}, model=model)
 
-def ai_trade_thesis(context: dict, model: str = "claude-sonnet-4-6") -> str:
+def ai_trade_thesis(context: dict, model: str = "auto") -> str:
     prompt = (
         "Write a concise 1-page TRADE THESIS for this stock. Include:\n"
         "1. Setup (what the technicals + fundamentals say)\n"

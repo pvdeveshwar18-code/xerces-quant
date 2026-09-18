@@ -1,0 +1,22 @@
+﻿# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.class
+
+# Database and local state
+*.db
+*.sqlite3
+data/*.db
+data/*.sqlite3
+
+# Secrets and local config
+.env
+.venv/
+env/
+venv/
+.streamlit/secrets.toml
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
