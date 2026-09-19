@@ -1,31 +1,46 @@
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Dict
 
-from dotenv import load_dotenv
+# Path to the .env file at the project root
+ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
-# Resolve project root (assumes this file is located at <repo_root>/utils)
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-ENV_PATH = PROJECT_ROOT / '.env'
-if ENV_PATH.exists():
-    load_dotenv(dotenv_path=ENV_PATH)
-
-def get_env_var(key: str, default: Optional[str] = None) -> str:
-    """Fetch an environment variable.
-    Raises an informative error if the variable is missing and no default is provided.
+def load_credentials() -> Dict[str, str]:
+    """Load Kotak Neo credentials from .env if present.
+    Returns a dict with keys: consumer_key, mobile_number, client_code.
+    Missing values default to empty strings.
     """
-    value = os.getenv(key, default)
-    if value is None:
-        raise EnvironmentError(f"Required environment variable '{key}' is not set.")
-    return value
+    creds = {"consumer_key": "", "mobile_number": "", "client_code": ""}
+    if ENV_FILE.is_file():
+        for line in ENV_FILE.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                continue
+            key, val = line.split("=", 1)
+            key, val = key.strip(), val.strip()
+            if key == "KOTAK_CONSUMER_KEY":
+                creds["consumer_key"] = val
+            elif key == "KOTAK_MOBILE_NUMBER":
+                creds["mobile_number"] = val
+            elif key == "KOTAK_CLIENT_CODE":
+                creds["client_code"] = val
+    return creds
 
-def get_kotak_credentials() -> tuple[str, str]:
-    """Return the Kotak Neo API key and secret from environment variables.
+def save_credentials(consumer_key: str, mobile_number: str, client_code: str) -> None:
+    """Write the provided credentials to .env (overwrites the file)."""
+    lines = []
+    if consumer_key:
+        lines.append(f"KOTAK_CONSUMER_KEY={consumer_key}")
+    if mobile_number:
+        lines.append(f"KOTAK_MOBILE_NUMBER={mobile_number}")
+    if client_code:
+        lines.append(f"KOTAK_CLIENT_CODE={client_code}")
+    # Ensure directory exists
+    ENV_FILE.parent.mkdir(parents=True, exist_ok=True)
+    ENV_FILE.write_text("\n".join(lines) + "\n")
 
-    Expected environment variables:
-        - KOTAK_API_KEY
-        - KOTAK_API_SECRET
-    """
-    api_key = get_env_var('KOTAK_API_KEY')
-    api_secret = get_env_var('KOTAK_API_SECRET')
-    return api_key, api_secret
+def get_kotak_credentials() -> Dict[str, str]:
+    """Convenient wrapper returning the dict format expected by KotakNeoAdapter."""
+    return load_credentials()

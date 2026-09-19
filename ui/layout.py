@@ -2,6 +2,7 @@ import streamlit as st
 import plotly.graph_objects as go
 import pandas as pd
 from data.loader import ALL_STOCKS
+from utils import credentials as cred
 
 INDEX_META_INDIA = [
     ("^NSEI","NIFTY 50","#00e87a"), ("^NSEBANK","BANK NIFTY","#00c8ff"),
@@ -17,13 +18,13 @@ INDEX_META_COMMODITIES = [
 
 INDEX_META_US = [
     ("^GSPC","S&P 500","#00e87a"), ("^IXIC","NASDAQ","#00c8ff"),
-    ("^DJI","DOW JONES","#ffcc00"), ("^RUT","RUSSELL 2000","#ff6b35"),
+    ("^DJI","DOW JONES","#ffcc00"), ("^RUT","RUSSELL 2000","#ff3355"),
     ("BTC-USD","BITCOIN","#7c6ef8"), ("^VIX","VOLATILITY VIX","#ff3355"),
 ]
 
 def render_header(now_dt, status_text: str, status_color: str, market_mode: str = "🇮🇳 Indian Market (NSE/BSE)"):
     """Render top page header, clock, and market status."""
-    col_title, col_clock = st.columns([2, 1])
+    col_title, col_clock, col_menu = st.columns([2, 1, 1])
     with col_title:
         st.markdown('<h1 class="xerces-title">XERCES // QUANT ENGINE</h1>', unsafe_allow_html=True)
         if "Commodities" in market_mode:
@@ -42,8 +43,27 @@ def render_header(now_dt, status_text: str, status_color: str, market_mode: str 
             <div>DATE: <span style="color:#00c8ff;">{now_dt.strftime('%d %b %Y')}</span></div>
             <div style="margin-top:3px;color:{status_color};font-weight:bold;">{status_text}</div>
         </div>""", unsafe_allow_html=True)
-
-    st.markdown("<hr style='border-color:rgba(0,200,255,0.12);margin:0.65rem 0;'>", unsafe_allow_html=True)
+    # Login / Logout button
+    with col_menu:
+        global_creds = cred.get_kotak_credentials()
+        if global_creds.get("consumer_key"):
+            if st.button("Logout", key="logout_btn"):
+                # clear .env file
+                cred.save_credentials("","","")
+                st.session_state.pop("global_kotak_creds", None)
+                st.experimental_rerun()
+        else:
+            if st.button("Login", key="login_btn"):
+                with st.expander("Enter Kotak Neo Credentials"):
+                    consumer_key = st.text_input("Consumer Key:", type="password")
+                    mobile_number = st.text_input("Mobile Number (+91):", type="password")
+                    client_code = st.text_input("Client Code:", type="password")
+                    if st.button("Save Credentials"):
+                        cred.save_credentials(consumer_key, mobile_number, client_code)
+                        st.session_state["global_kotak_creds"] = cred.get_kotak_credentials()
+                        st.success("✅ Credentials saved and will be used globally.")
+                        st.experimental_rerun()
+    st.markdown("<hr style='border-color:rgba(0,200,255,0.12);margin:0.65rem 0;'/>", unsafe_allow_html=True)
 
 def render_global_search(market_mode: str = "🇮🇳 Indian Market (NSE/BSE)") -> str:
     """Render the global search bar with Market Selector. Returns search query."""
@@ -80,7 +100,7 @@ def render_dashboard_landing(idx_data: dict[str, pd.DataFrame], market_mode: str
         currency_sym = "$"
 
     st.markdown(f'<h2 class="xerces-title" style="font-size:1.5rem;margin-bottom:12px;">📊 LIVE {m_label} MARKET OVERVIEW</h2>', unsafe_allow_html=True)
-    
+
     cols = st.columns(6)
     for col, (sym, name, clr) in zip(cols, INDEX_META):
         try:
@@ -93,11 +113,13 @@ def render_dashboard_landing(idx_data: dict[str, pd.DataFrame], market_mode: str
             flip = "VIX" in sym
             cclr = ("#ff3355" if chg >= 0 else "#00e87a") if flip else ("#00e87a" if chg >= 0 else "#ff3355")
             arrow= "▲" if chg >= 0 else "▼"
-            col.markdown(f"""<div class="glass-card">
+            col.markdown(f"""
+            <div class="glass-card">
                 <p class="glass-label" style="color:{clr};">{name}</p>
                 <div class="glass-value" style="font-size:1.1rem;">{currency_sym}{cv:,.2f}</div>
                 <p style="font-size:11px;color:{cclr};margin:2px 0;font-weight:600;">{arrow} {abs(chg):.2f}%</p>
-            </div>""", unsafe_allow_html=True)
+            </div>
+            """, unsafe_allow_html=True)
         except Exception:
             col.warning(name)
 
@@ -117,11 +139,13 @@ def render_dashboard_landing(idx_data: dict[str, pd.DataFrame], market_mode: str
         pass
 
     example_stocks = "<b style='color:#00c8ff;'>Reliance</b>, <b style='color:#00c8ff;'>TCS</b>, <b style='color:#00c8ff;'>HDFCBANK</b>" if "Indian" in market_mode else "<b style='color:#00c8ff;'>NVDA</b>, <b style='color:#00c8ff;'>AAPL</b>, <b style='color:#00c8ff;'>TSLA</b>"
-    st.markdown(f"""<div class="glass-card" style="margin-top:10px;">
+    st.markdown(f"""
+    <div class="glass-card" style="margin-top:10px;">
         <p class="section-header" style="margin-top:0;">💡 How to use XERCES</p>
         <p style="font-size:12px;color:#a0aec0;line-height:1.7;margin:0;">
         Type any stock name or symbol in the search bar above — e.g. {example_stocks}.
         You'll get live technical charts with MACD/RSI/Bollinger Bands, ARIMA + Holt-Winters price forecast,
         multi-strategy backtesting, bulk market scanner, portfolio optimizer (MPT), news sentiment, Vibe Strategy AI Copilot, and full risk calculator.
         </p>
-    </div>""", unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)

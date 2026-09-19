@@ -95,9 +95,21 @@ class KotakNeoStreamer(BaseLiveStreamer):
         self.ws: Optional[websocket.WebSocketApp] = None
 
     def connect(self) -> None:
+        # If the websocket-client library is unavailable, inform the user via Streamlit UI
         if websocket is None:
-            logger.error("websocket-client library not installed; cannot connect to Kotak Neo.")
-            raise RuntimeError("Missing websocket-client dependency")
+            try:
+                import streamlit as st
+                st.error(
+                    "❌ Live streaming requires the `websocket-client` library. "
+                    "Please install it (see requirements.txt) and restart the app."
+                )
+            except Exception:
+                # Fallback to logger if Streamlit import fails (e.g., during tests)
+                logger.error(
+                    "websocket-client library not installed; cannot connect to Kotak Neo."
+                )
+            # Abort connection attempt without raising an exception that crashes the app
+            return
 
         def _on_open(ws):
             logger.info("WebSocket connection opened.")
