@@ -17,14 +17,17 @@ def render_portfolio_tab(allocated_capital: float):
     import streamlit as st
     from utils.portfolio import fetch_kotak_portfolio
 
-    # Button to load Kotak Neo portfolio
     if st.button("Load Kotak Neo Portfolio", key="load_kotak_portfolio"):
         with st.spinner("Fetching your Kotak Neo holdings…"):
             portfolio_data = fetch_kotak_portfolio()
         if portfolio_data:
             df = pd.DataFrame(portfolio_data)
+            # Compute market value for styling
+            if "quantity" in df.columns and "last_price" in df.columns:
+                df["market_value"] = df["quantity"] * df["last_price"]
             st.subheader("Kotak Neo Portfolio")
-            st.dataframe(df.style.hide_index().background_gradient(subset=["market_value"], cmap="RdYlGn"))
+            styled_df = df.style.hide(axis='index').background_gradient(subset=["market_value"], cmap="RdYlGn")
+            st.dataframe(styled_df)
         else:
             st.info("No holdings retrieved or portfolio is empty.")
 
