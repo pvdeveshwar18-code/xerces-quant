@@ -10,8 +10,25 @@ from data.loader import ALL_STOCKS, SECTORS, resolve_ticker, get_sector_peers
 from forecast_engine import run_holt_winters
 
 def render_portfolio_tab(allocated_capital: float):
-    """Render Custom Portfolio Tracker & MPT Portfolio Optimizer tab."""
+    """Render Custom Portfolio Tracker & ROTATION ADVISOR tab.
+    Includes optional loading of Kotak Neo portfolio via the global credentials.
+    """
     # ── SUBSECTION 1: CUSTOM PORTFOLIO TRACKER & ROTATION ADVISOR ────────────
+    import streamlit as st
+    from utils.portfolio import fetch_kotak_portfolio
+
+    # Button to load Kotak Neo portfolio
+    if st.button("Load Kotak Neo Portfolio", key="load_kotak_portfolio"):
+        with st.spinner("Fetching your Kotak Neo holdings…"):
+            portfolio_data = fetch_kotak_portfolio()
+        if portfolio_data:
+            df = pd.DataFrame(portfolio_data)
+            st.subheader("Kotak Neo Portfolio")
+            st.dataframe(df.style.hide_index().background_gradient(subset=["market_value"], cmap="RdYlGn"))
+        else:
+            st.info("No holdings retrieved or portfolio is empty.")
+
+    # Existing custom portfolio editor follows
     st.markdown('<p class="section-header">[ 💼 MY CUSTOM PORTFOLIO TRACKER & ROTATION ADVISOR ]</p>', unsafe_allow_html=True)
     st.caption("Enter your custom portfolio details below to project 1-year returns and receive rotation optimization advice.")
 
