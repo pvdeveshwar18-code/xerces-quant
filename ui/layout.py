@@ -56,7 +56,8 @@ def render_header(now_dt, status_text: str, status_color: str, market_mode: str 
                 st.session_state.pop("global_kotak_creds", None)
                 # Reset login flag
                 st.session_state["show_login"] = False
-                st.experimental_rerun()
+                st.rerun()
+                return
         else:
             # Show Login button; clicking opens persistent expander
             if st.button("Login", key="login_btn"):
@@ -72,7 +73,8 @@ def render_header(now_dt, status_text: str, status_color: str, market_mode: str 
                         st.success("✅ Credentials saved and will be used globally.")
                         # Hide login expander after save
                         st.session_state["show_login"] = False
-                        st.experimental_rerun()
+                        st.rerun()
+                        return
     st.markdown("<hr style='border-color:rgba(0,200,255,0.12);margin:0.65rem 0;'/>", unsafe_allow_html=True)
 
 def render_global_search(market_mode: str = "🇮🇳 Indian Market (NSE/BSE)") -> str:
