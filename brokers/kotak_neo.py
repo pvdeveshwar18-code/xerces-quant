@@ -59,5 +59,13 @@ class KotakNeoAdapter:
         }
 
     def get_positions(self) -> list:
-        """Fetch active positions."""
-        return []
+        """Fetch active positions.
+        In this demo environment we return a static sample portfolio.
+        Returns a list of dicts with keys: symbol, quantity, avg_price, last_price.
+        """
+        sample = [
+            {"symbol": "RELIANCE.NS", "quantity": 10, "avg_price": 2400.0, "last_price": 2500.0},
+            {"symbol": "TCS.NS", "quantity": 5, "avg_price": 3800.0, "last_price": 3900.0},
+            {"symbol": "HDFCBANK.NS", "quantity": 15, "avg_price": 1500.0, "last_price": 1550.0},
+        ]
+        return sample
