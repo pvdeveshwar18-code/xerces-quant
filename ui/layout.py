@@ -24,6 +24,9 @@ INDEX_META_US = [
 
 def render_header(now_dt, status_text: str, status_color: str, market_mode: str = "🇮🇳 Indian Market (NSE/BSE)"):
     """Render top page header, clock, and market status."""
+    # Ensure persistent login state flag exists
+    if "show_login" not in st.session_state:
+        st.session_state["show_login"] = False
     col_title, col_clock, col_menu = st.columns([2, 1, 1])
     with col_title:
         st.markdown('<h1 class="xerces-title">XERCES // QUANT ENGINE</h1>', unsafe_allow_html=True)
@@ -51,10 +54,15 @@ def render_header(now_dt, status_text: str, status_color: str, market_mode: str 
                 # clear .env file
                 cred.save_credentials("","","")
                 st.session_state.pop("global_kotak_creds", None)
+                # Reset login flag
+                st.session_state["show_login"] = False
                 st.experimental_rerun()
         else:
+            # Show Login button; clicking opens persistent expander
             if st.button("Login", key="login_btn"):
-                with st.expander("Enter Kotak Neo Credentials"):
+                st.session_state["show_login"] = True
+            if st.session_state.get("show_login"):
+                with st.expander("Enter Kotak Neo Credentials", expanded=True):
                     consumer_key = st.text_input("Consumer Key:", type="password")
                     mobile_number = st.text_input("Mobile Number (+91):", type="password")
                     client_code = st.text_input("Client Code:", type="password")
@@ -62,6 +70,8 @@ def render_header(now_dt, status_text: str, status_color: str, market_mode: str 
                         cred.save_credentials(consumer_key, mobile_number, client_code)
                         st.session_state["global_kotak_creds"] = cred.get_kotak_credentials()
                         st.success("✅ Credentials saved and will be used globally.")
+                        # Hide login expander after save
+                        st.session_state["show_login"] = False
                         st.experimental_rerun()
     st.markdown("<hr style='border-color:rgba(0,200,255,0.12);margin:0.65rem 0;'/>", unsafe_allow_html=True)
 
