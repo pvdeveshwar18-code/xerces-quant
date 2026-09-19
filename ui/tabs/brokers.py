@@ -26,11 +26,15 @@ def render_brokers_tab(selected_name: str, selected_ticker: str, close: float):
         col_k1, col_k2 = st.columns(2)
         with col_k1:
             neo_key = st.text_input("Consumer Key:", value=st.session_state.get("neo_key", ""), type="password", key="neo_k_in")
-            neo_secret = st.text_input("Consumer Secret:", value=st.session_state.get("neo_secret", ""), type="password", key="neo_s_in")
+            # Show secret field only if user indicates they have one (legacy flow)
+            show_secret = st.checkbox("I have a Consumer Secret (legacy)", value=False, key="show_secret_chk")
+            if show_secret:
+                neo_secret = st.text_input("Consumer Secret:", value=st.session_state.get("neo_secret", ""), type="password", key="neo_s_in")
+            else:
+                neo_secret = ""
         with col_k2:
             neo_mobile = st.text_input("Mobile Number (+91):", value=st.session_state.get("neo_mobile", ""), key="neo_m_in")
             neo_code = st.text_input("Kotak Client Code:", value=st.session_state.get("neo_code", ""), key="neo_c_in")
-            
         if st.button("🔗 Connect Kotak Neo API", use_container_width=True, key="conn_neo_btn"):
             adapter = KotakNeoAdapter(consumer_key=neo_key, consumer_secret=neo_secret, mobile_number=neo_mobile, client_code=neo_code)
             auth_res = adapter.authenticate()

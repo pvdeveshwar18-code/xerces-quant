@@ -10,7 +10,8 @@ import json
 class KotakNeoAdapter:
     def __init__(self, consumer_key: str = "", consumer_secret: str = "", mobile_number: str = "", client_code: str = ""):
         self.consumer_key = consumer_key
-        self.consumer_secret = consumer_secret
+        # The Consumer Secret is optional in the new Kotak Neo API. Keep it for backward compatibility but allow empty.
+        self.consumer_secret = consumer_secret or ""
         self.mobile_number = mobile_number
         self.client_code = client_code
         self.session_token = None
