@@ -13,6 +13,15 @@ from data.loader import (
 )
 from analytics.indicators import add_indicators, get_signal, get_signal_strength
 from ui.layout import render_header, render_global_search, render_dashboard_landing
+# Global configuration loading
+import json, pathlib
+CONFIG_PATH = pathlib.Path(__file__).parent / "config.json"
+if CONFIG_PATH.is_file():
+    with open(CONFIG_PATH) as _cfg_file:
+        CONFIG = json.load(_cfg_file)
+else:
+    CONFIG = {}
+st.session_state.setdefault("config", CONFIG)
 from ui.tabs.chart import render_chart_tab
 from ui.tabs.forecast import render_forecast_tab
 from ui.tabs.backtest import render_backtest_tab
