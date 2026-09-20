@@ -1,4 +1,4 @@
-﻿"""
+"""
 Live Broker Connection and Tick Streaming Engine for XERCES.
 Supports:
 - Zerodha Kite Connect & KiteTicker WebSockets
@@ -12,7 +12,7 @@ import json
 import logging
 from typing import Callable, Optional
 import pandas as pd
-from data.database import get_broker_credentials, save_broker_credentials
+from data.database import load_broker_credentials, save_broker_credentials
 
 logger = logging.getLogger("xerces_streamer")
 
@@ -28,7 +28,7 @@ class LiveMarketStreamer:
         self._load_credentials()
 
     def _load_credentials(self):
-        creds_json = get_broker_credentials(self.broker)
+        creds_json = load_broker_credentials(self.broker)
         self.credentials = json.loads(creds_json) if creds_json else {}
 
     def authenticate(self, api_key: str = "", api_secret: str = "", access_token: str = "") -> dict:

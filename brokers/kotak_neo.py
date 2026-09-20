@@ -6,6 +6,7 @@ position tracking, and order status updates for Indian Markets.
 
 import requests
 import json
+import time
 
 class KotakNeoAdapter:
     def __init__(self, consumer_key: str = "", consumer_secret: str = "", mobile_number: str = "", client_code: str = ""):
@@ -47,7 +48,7 @@ class KotakNeoAdapter:
         return {
             "status": "COMPLETE",
             "broker": "Kotak Neo",
-            "order_id": f"NEO_{int(requests.utils.time.time())}",
+            "order_id": f"NEO_{int(time.time())}_{clean_symbol[:4]}",
             "symbol": clean_symbol,
             "transaction_type": transaction_type,
             "quantity": quantity,

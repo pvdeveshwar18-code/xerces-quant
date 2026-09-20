@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 from analytics.risk_models import compute_cvar, run_historical_stress_test
 
-def render_risk_tab(df: pd.DataFrame, selected_name: str, close: float, sl_price: float, tp_price: float, allocated_capital: float, risk_per_trade: float):
+def render_risk_tab(df: pd.DataFrame, selected_name: str, selected_ticker: str, close: float, sl_price: float, tp_price: float, allocated_capital: float, risk_per_trade: float):
     """Render Position Sizing, CVaR Expected Shortfall, and Historical Stress Testing tab."""
     st.markdown(f'<p class="section-header">[ RISK CALCULATOR & CVaR STRESS TEST — {selected_name} ]</p>', unsafe_allow_html=True)
     
@@ -100,7 +100,7 @@ def render_risk_tab(df: pd.DataFrame, selected_name: str, close: float, sl_price
                 from brokers.executor import execute_order
                 res = execute_order(
                     broker_name=selected_broker,
-                    symbol=selected_name,
+                    symbol=selected_ticker,
                     transaction_type=order_side,
                     quantity=exec_qty,
                     price=entry_px if 'entry_px' in locals() else close

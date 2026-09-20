@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Dict
 
 # Path to the .env file at the project root
-ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
+ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
 def load_credentials() -> Dict[str, str]:
     """Load Kotak Neo credentials from .env if present.
