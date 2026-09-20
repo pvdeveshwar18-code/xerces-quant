@@ -38,7 +38,7 @@ from ui.tabs.ai_analyst import render_ai_analyst_tab
 from ui.tabs.journal import render_journal_tab
 from ui.tabs.export import render_export_tab
 from ui.tabs.manual import render_manual_tab
-from ui.tabs.brokers import render_brokers_tab
+from ui.toolbar import render_login, render_order_history, render_order_tab
 
 warnings.filterwarnings("ignore")
 
@@ -223,6 +223,7 @@ market_mode = st.session_state.get("global_market_mode", "🇮🇳 Indian Market
 now_dt = get_market_now(market_mode)
 ms, mc = market_status(market_mode)
 render_header(now_dt, ms, mc, market_mode=market_mode)
+render_login()
 search_raw = render_global_search(market_mode=market_mode)
 
 # Ticker Resolution
@@ -463,7 +464,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
 TAB_OPTIONS = [
     "📊 CHART", "🔮 FORECAST", "📈 BACKTEST", "📡 SCANNER",
-    "🛡️ RISK", "🔌 BROKERS", "💼 PORTFOLIO", "📊 FII/DII", "🎯 OPTIONS", "📋 FUNDAMENTALS", "📰 NEWS",
+    "🛡️ RISK", "🛒 ORDER", "💼 PORTFOLIO", "📊 FII/DII", "🎯 OPTIONS", "📋 FUNDAMENTALS", "📰 NEWS",
     "🔥 HEATMAP", "🔄 COMPARE", "🤖 AI ANALYST", "📓 JOURNAL", "📄 EXPORT",
     "❓ MANUAL",
 ]
@@ -517,8 +518,8 @@ elif active_tab == "🛡️ RISK":
         risk_per_trade=risk_per_trade
     )
 
-elif active_tab == "🔌 BROKERS":
-    render_brokers_tab(selected_name=selected_name, selected_ticker=selected_ticker, close=close)
+elif active_tab == "🛒 ORDER":
+    render_order_tab(selected_name=selected_name, selected_ticker=selected_ticker, close=close)
 
 elif active_tab == "💼 PORTFOLIO":
     render_portfolio_tab(allocated_capital=allocated_capital)

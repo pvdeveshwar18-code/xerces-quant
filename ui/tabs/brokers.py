@@ -125,7 +125,7 @@ def render_brokers_tab(selected_name: str, selected_ticker: str, close: float):
 
     st.markdown("---")
 
-    # ── SECTION 2: 1-CLICK ORDER EXECUTION TERMINAL ─────────────────────────
+
     st.markdown(f'#### ⚡ 1-Click Order Execution Terminal — `{selected_name}` (`{selected_ticker}`)')
 
     col_e1, col_e2, col_e3, col_e4 = st.columns([1.5, 1, 1, 1])

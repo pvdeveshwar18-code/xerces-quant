@@ -6,7 +6,8 @@ Supports Kotak Neo, Zerodha Kite, Angel One, Upstox, and Alpaca US.
 from brokers.kotak_neo import KotakNeoAdapter
 from brokers.zerodha_kite import ZerodhaKiteAdapter
 from brokers.alpaca import AlpacaUSAdapter
-
+import streamlit as st
+import time
 SUPPORTED_BROKERS = [
     "Kotak Neo (NSE/BSE)",
     "Zerodha Kite Connect",
@@ -28,6 +29,38 @@ def execute_order(
     Executes order on selected broker adapter.
     """
     creds = credentials if credentials else {}
+    # Retrieve global configuration (PAPER_MODE) from Streamlit session state
+    paper_mode = st.session_state.get("config", {}).get("PAPER_MODE", False)
+    if paper_mode:
+        # Simulated execution – no live order sent
+        sim_order_id = f"SIM_{broker_name[:3].upper()}_{int(time.time())}"
+        res = {
+            "status": "COMPLETE",
+            "broker": broker_name,
+            "order_id": sim_order_id,
+            "symbol": symbol.upper(),
+            "transaction_type": transaction_type,
+            "quantity": quantity,
+            "order_type": order_type,
+            "paper_mode": True,
+            "message": f"Paper mode active – simulated {transaction_type} order for {quantity} shares of {symbol} via {broker_name}"
+        }
+        # Simple audit log (in session state)
+        st.session_state.setdefault("order_audit_log", []).append({
+            "timestamp": time.time(),
+            "paper_mode": True,
+            "request": {
+                "broker_name": broker_name,
+                "symbol": symbol,
+                "transaction_type": transaction_type,
+                "quantity": quantity,
+                "price": price,
+                "order_type": order_type,
+                "credentials": creds
+            },
+            "response": res
+        })
+        return res
     
     if "Kotak Neo" in broker_name:
         adapter = KotakNeoAdapter(
