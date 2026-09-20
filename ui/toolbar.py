@@ -17,8 +17,8 @@ def render_login():
             st.session_state.pop("user", None)
             st.experimental_rerun()
         return
-    # Show modal for login
-    with st.modal("Login"):
+    # Show expander for login (st.modal not available)
+    with st.expander("Login"):
         st.markdown("## 📥 Login")
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
