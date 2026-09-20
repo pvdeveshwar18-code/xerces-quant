@@ -38,7 +38,7 @@ from ui.tabs.ai_analyst import render_ai_analyst_tab
 from ui.tabs.journal import render_journal_tab
 from ui.tabs.export import render_export_tab
 from ui.tabs.manual import render_manual_tab
-from ui.toolbar import render_login, render_order_history, render_order_tab
+from ui.toolbar import render_order_history, render_order_tab
 
 warnings.filterwarnings("ignore")
 
@@ -223,7 +223,7 @@ market_mode = st.session_state.get("global_market_mode", "🇮🇳 Indian Market
 now_dt = get_market_now(market_mode)
 ms, mc = market_status(market_mode)
 render_header(now_dt, ms, mc, market_mode=market_mode)
-render_login()
+# render_login() removed – login not needed
 search_raw = render_global_search(market_mode=market_mode)
 
 # Ticker Resolution
