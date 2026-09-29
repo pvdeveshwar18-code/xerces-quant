@@ -1,4 +1,4 @@
-﻿# Byte-compiled / optimized / DLL files
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *.class
@@ -11,6 +11,7 @@ data/*.sqlite3
 
 # Secrets and local config
 .env
+.portfolio_cache.json
 .venv/
 env/
 venv/

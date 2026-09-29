@@ -22,18 +22,23 @@ def calc_volume_profile(df: pd.DataFrame, price_bins: int = 100) -> Tuple[pd.Dat
         Lower and upper price bounds that contain ~70 % of total volume
         (the classic value area).
     """
-    if not {'high', 'low', 'volume'}.issubset(df.columns):
+    col_map = {str(c).lower(): c for c in df.columns}
+    if not {'high', 'low', 'volume'}.issubset(col_map.keys()):
         raise ValueError("DataFrame must contain 'high', 'low', and 'volume' columns")
 
+    high_col = col_map['high']
+    low_col = col_map['low']
+    vol_col = col_map['volume']
+
     # Determine global price range
-    min_price = df['low'].min()
-    max_price = df['high'].max()
+    min_price = float(df[low_col].min())
+    max_price = float(df[high_col].max())
     bins = np.linspace(min_price, max_price, price_bins + 1)
     volume_per_bin = np.zeros(price_bins, dtype=float)
 
     for _, row in df.iterrows():
         # proportion of the bar's volume assigned to each intersecting bin
-        bar_low, bar_high, vol = row['low'], row['high'], row['volume']
+        bar_low, bar_high, vol = float(row[low_col]), float(row[high_col]), float(row[vol_col])
         # Find intersecting bin indices
         intersect_idxs = np.where((bins[:-1] < bar_high) & (bins[1:] > bar_low))[0]
         if intersect_idxs.size == 0:

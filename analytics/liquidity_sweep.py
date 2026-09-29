@@ -8,29 +8,52 @@ def detect_liquidity_sweeps(df: pd.DataFrame, sweep_threshold: float = 0.02) -> 
     ----------
     df: pd.DataFrame
         Must contain columns ``['timestamp', 'volume', 'bid_volume', 'ask_volume']``
-        where ``volume`` is the total traded volume for the bar and the bid/ask
-        volumes represent the order‑book depth at the start of the bar.
+        (case-insensitive).
     sweep_threshold: float, default 0.02
         Fraction of the bar's total volume that must be executed in a single
-        burst to be considered a sweep (e.g., 0.02 = 2 % of volume).
+        burst to be considered a sweep (e.g., 0.02 = 2% of volume).
 
     Returns
     -------
     List[Dict]
-        Each dict corresponds to a sweep event with ``timestamp`` and ``strength``
-        (fraction of volume swept).
+        Each dict corresponds to a sweep event with ``timestamp``, ``strength``,
+        and ``type`` ('bid' or 'ask').
     """
     sweeps = []
-    required = df['volume'] * sweep_threshold
-    for _, row in df.iterrows():
-        # Simple heuristic: if either side's depth drops by more than the threshold
-        # we treat it as a sweep. In real data you would compare successive depth
-        # snapshots; here we approximate with the provided aggregate.
-        if row.get('bid_volume', 0) < required or row.get('ask_volume', 0) < required:
-            strength = max(required / row['volume'], 0)
+    if df is None or df.empty:
+        return sweeps
+
+    col_map = {str(c).lower(): c for c in df.columns}
+    vol_col = col_map.get('volume')
+    bid_col = col_map.get('bid_volume')
+    ask_col = col_map.get('ask_volume')
+    ts_col = col_map.get('timestamp') or col_map.get('date') or col_map.get('time')
+
+    if not vol_col:
+        return sweeps
+
+    for idx, row in df.iterrows():
+        try:
+            bar_vol = float(row[vol_col])
+        except (ValueError, TypeError):
+            continue
+
+        if bar_vol <= 0:
+            continue
+
+        required = bar_vol * sweep_threshold
+        bid_vol = float(row.get(bid_col, 0) or 0) if bid_col else 0
+        ask_vol = float(row.get(ask_col, 0) or 0) if ask_col else 0
+
+        is_bid_sweep = (bid_col is not None and bid_vol < required)
+        is_ask_sweep = (ask_col is not None and ask_vol < required)
+
+        if is_bid_sweep or is_ask_sweep:
+            strength = round(max(required / bar_vol, 0.0), 4)
+            timestamp = row.get(ts_col) if ts_col else idx
             sweeps.append({
-                'timestamp': row['timestamp'],
+                'timestamp': timestamp,
                 'strength': strength,
-                'type': 'bid' if row.get('bid_volume', 0) < required else 'ask'
+                'type': 'bid' if is_bid_sweep else 'ask'
             })
     return sweeps

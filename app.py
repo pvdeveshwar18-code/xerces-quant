@@ -22,6 +22,11 @@ if CONFIG_PATH.is_file():
 else:
     CONFIG = {}
 st.session_state.setdefault("config", CONFIG)
+
+# Initialise SQLite audit log database
+from utils import db
+db.init_db()
+
 from ui.tabs.chart import render_chart_tab
 from ui.tabs.forecast import render_forecast_tab
 from ui.tabs.backtest import render_backtest_tab
@@ -291,9 +296,25 @@ with st.sidebar:
     market_mode = st.radio("Active Market:", ["🇮🇳 Indian Market (NSE/BSE)", "🛢️ Commodities (MCX / Global)", "🇺🇸 US Market (NASDAQ/NYSE)"], horizontal=True, key="global_market_mode")
     st.markdown("---")
     st.markdown("<p class='telemetry-tag' style='color:#00c8ff;font-weight:700;margin-bottom:5px;'>[ 🛡️ RISK CONTROLS ]</p>", unsafe_allow_html=True)
-    allocated_capital = st.number_input("Capital Pool (₹)", min_value=1000, value=100000, step=5000)
-    risk_per_trade    = st.slider("Risk per Trade (%)", 0.5, 5.0, 1.5, step=0.1)
-    risk_reward       = st.slider("Risk:Reward (1:X)", 1.5, 4.0, 2.0, step=0.5)
+    cfg = st.session_state.get("config", {})
+    default_cap = int(cfg.get("CAPITAL_POOL", 100000))
+    default_risk = float(cfg.get("MAX_RISK_PER_TRADE", 1.5))
+    default_rr = float(cfg.get("RISK_REWARD", 2.0))
+    default_paper = bool(cfg.get("PAPER_MODE", True))
+
+    paper_mode = st.toggle(
+        "🛡️ Paper Trading Mode",
+        value=st.session_state.get("paper_mode", default_paper),
+        key="sidebar_paper_mode_toggle",
+        help="Simulate orders safely without routing real money."
+    )
+    st.session_state["paper_mode"] = paper_mode
+    if "config" in st.session_state and isinstance(st.session_state["config"], dict):
+        st.session_state["config"]["PAPER_MODE"] = paper_mode
+
+    allocated_capital = st.number_input("Capital Pool (₹)", min_value=1000, value=default_cap, step=5000)
+    risk_per_trade    = st.slider("Risk per Trade (%)", 0.5, 5.0, default_risk, step=0.1)
+    risk_reward       = st.slider("Risk:Reward (1:X)", 1.5, 4.0, default_rr, step=0.5)
     st.markdown("---")
     st.markdown("<p class='telemetry-tag' style='color:#00c8ff;font-weight:700;margin-bottom:5px;'>[ ⚙️ CHART SETTINGS ]</p>", unsafe_allow_html=True)
     show_bb   = st.checkbox("Bollinger Bands", value=True)
@@ -513,7 +534,7 @@ elif active_tab == "📡 SCANNER":
 
 elif active_tab == "🛡️ RISK":
     render_risk_tab(
-        df=df, selected_name=selected_name, close=close, sl_price=sl_price,
+        df=df, selected_name=selected_name, selected_ticker=selected_ticker, close=close, sl_price=sl_price,
         tp_price=tp_price, allocated_capital=allocated_capital,
         risk_per_trade=risk_per_trade
     )

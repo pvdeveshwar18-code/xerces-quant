@@ -13,23 +13,76 @@ def render_portfolio_tab(allocated_capital: float):
     """Render Custom Portfolio Tracker & ROTATION ADVISOR tab.
     Includes optional loading of Kotak Neo portfolio via the global credentials.
     """
-    # ── SUBSECTION 1: CUSTOM PORTFOLIO TRACKER & ROTATION ADVISOR ────────────
+    # ── SUBSECTION 1: KOTAK NEO LIVE PORTFOLIO CONNECTOR ────────────────────
     import streamlit as st
     from utils.portfolio import fetch_kotak_portfolio
 
-    if st.button("Load Kotak Neo Portfolio", key="load_kotak_portfolio"):
-        with st.spinner("Fetching your Kotak Neo holdings…"):
-            portfolio_data = fetch_kotak_portfolio()
-        if portfolio_data:
-            df = pd.DataFrame(portfolio_data)
-            # Compute market value for styling
-            if "quantity" in df.columns and "last_price" in df.columns:
-                df["market_value"] = df["quantity"] * df["last_price"]
-            st.subheader("Kotak Neo Portfolio")
-            styled_df = df.style.hide(axis='index').background_gradient(subset=["market_value"], cmap="RdYlGn")
-            st.dataframe(styled_df)
-        else:
-            st.info("No holdings retrieved or portfolio is empty.")
+    col_btn1, col_btn2 = st.columns([1.5, 3])
+    with col_btn1:
+        if st.button("🔗 Fetch Kotak Neo Holdings", key="load_kotak_portfolio"):
+            with st.spinner("Connecting to Kotak Neo & fetching holdings…"):
+                data = fetch_kotak_portfolio(force_refresh=True)
+                st.session_state["kotak_portfolio_data"] = data
+                st.session_state["show_kotak_portfolio"] = True
+                if not data:
+                    st.info("No active holdings found in Kotak Neo account.")
+
+    if st.session_state.get("show_kotak_portfolio") and st.session_state.get("kotak_portfolio_data"):
+        holdings = st.session_state["kotak_portfolio_data"]
+        df_k = pd.DataFrame(holdings)
+        if not df_k.empty:
+            if "market_value" not in df_k.columns and "quantity" in df_k.columns and "last_price" in df_k.columns:
+                df_k["market_value"] = df_k["quantity"] * df_k["last_price"]
+            if "invested_val" not in df_k.columns and "quantity" in df_k.columns and "avg_price" in df_k.columns:
+                df_k["invested_val"] = df_k["quantity"] * df_k["avg_price"]
+            if "pnl" not in df_k.columns and "market_value" in df_k.columns and "invested_val" in df_k.columns:
+                df_k["pnl"] = df_k["market_value"] - df_k["invested_val"]
+                df_k["pnl_pct"] = (df_k["pnl"] / df_k["invested_val"].replace(0, 1)) * 100
+
+            tot_inv = df_k["invested_val"].sum() if "invested_val" in df_k.columns else 0.0
+            tot_cur = df_k["market_value"].sum() if "market_value" in df_k.columns else 0.0
+            tot_pnl = tot_cur - tot_inv
+            tot_pnl_pct = (tot_pnl / tot_inv * 100) if tot_inv > 0 else 0.0
+            pnl_color = "#00e87a" if tot_pnl >= 0 else "#ff3355"
+
+            st.markdown(
+                f"""<div class="glass-card" style="margin-top:10px;margin-bottom:12px;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <span class="section-header" style="margin:0;">🏦 KOTAK NEO LIVE HOLDINGS</span>
+                        <span style="font-family:'Space Mono',monospace;font-size:12px;color:{pnl_color};font-weight:700;">
+                            P&L: {'+' if tot_pnl>=0 else ''}₹{tot_pnl:,.2f} ({'+' if tot_pnl_pct>=0 else ''}{tot_pnl_pct:.2f}%)
+                        </span>
+                    </div>
+                    <div style="display:flex;gap:24px;margin-top:8px;font-size:12px;color:#8a99ad;">
+                        <span>Invested: <b style="color:#e2e8f0;">₹{tot_inv:,.2f}</b></span>
+                        <span>Current Value: <b style="color:#00c8ff;">₹{tot_cur:,.2f}</b></span>
+                        <span>Holdings Count: <b style="color:#e2e8f0;">{len(df_k)}</b></span>
+                    </div>
+                </div>""",
+                unsafe_allow_html=True
+            )
+
+            col_act1, col_act2, col_act3 = st.columns([1.5, 1, 3])
+            with col_act1:
+                if st.button("📥 Import into Custom Tracker Below", key="import_kotak_btn"):
+                    imported_records = []
+                    for h in holdings:
+                        sym = str(h.get("symbol", "")).replace(".NS", "").replace(".BO", "").strip()
+                        imported_records.append({
+                            "Ticker": sym,
+                            "Quantity": int(h.get("quantity", 1)),
+                            "Buy Price (₹)": float(h.get("avg_price", 0.0))
+                        })
+                    if imported_records:
+                        st.session_state["custom_portfolio"] = pd.DataFrame(imported_records)
+                        st.success("✅ Imported Kotak Neo holdings into Custom Portfolio Tracker!")
+                        st.rerun()
+            with col_act2:
+                if st.button("❌ Hide Kotak Holdings", key="hide_kotak_btn"):
+                    st.session_state["show_kotak_portfolio"] = False
+                    st.rerun()
+
+            st.dataframe(df_k, use_container_width=True, hide_index=True)
 
     # Existing custom portfolio editor follows
     st.markdown('<p class="section-header">[ 💼 MY CUSTOM PORTFOLIO TRACKER & ROTATION ADVISOR ]</p>', unsafe_allow_html=True)
