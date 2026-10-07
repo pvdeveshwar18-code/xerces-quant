@@ -25,7 +25,9 @@ def render_chart_tab(
     buy_y: list, 
     sell_x: list, 
     sell_y: list, 
-    str_clr: str
+    str_clr: str,
+    selected_name: str = "",
+    selected_ticker: str = ""
 ):
     """Render main stock chart, technical indicator plots, and Machine Learning directional classifier."""
     rows = 4 if show_vol else 3
@@ -151,3 +153,48 @@ def render_chart_tab(
                 <div>SMA 20: <span style="color:#00c8ff;">₹{float(last.get('SMA_20', 0) or 0):,.0f}</span></div>
             </div>
         </div>""", unsafe_allow_html=True)
+
+    # Quick Trade on Signal Execution Bridge
+    if selected_ticker:
+        st.markdown("<br>", unsafe_allow_html=True)
+        with st.expander(f"⚡ Quick Execute on Signal ({selected_name or selected_ticker})", expanded=(signal in ["BUY", "SELL"])):
+            from brokers.executor import execute_order, SUPPORTED_BROKERS
+            paper_mode = st.session_state.get("paper_mode", st.session_state.get("config", {}).get("PAPER_MODE", True))
+            mode_lbl = "🟢 Paper Trading" if paper_mode else "🔴 Live Broker"
+            
+            qc1, qc2, qc3, qc4 = st.columns([1.5, 1, 1, 1])
+            with qc1:
+                q_broker = st.selectbox("Broker:", SUPPORTED_BROKERS, index=0, key="quick_chart_broker")
+            with qc2:
+                default_side_idx = 0 if signal != "SELL" else 1
+                q_side = st.selectbox("Side:", ["BUY", "SELL"], index=default_side_idx, key="quick_chart_side")
+            with qc3:
+                q_qty = st.number_input("Shares:", min_value=1, value=10, step=5, key="quick_chart_qty")
+            with qc4:
+                q_type = st.selectbox("Type:", ["MARKET", "LIMIT"], index=0, key="quick_chart_type")
+
+            q_limit_price = close
+            if q_type == "LIMIT":
+                q_limit_price = st.number_input(
+                    "Limit Price (₹):",
+                    min_value=0.01,
+                    value=round(close, 2) if close and close > 0 else 100.0,
+                    step=1.0,
+                    key="quick_chart_lmt_px"
+                )
+
+            st.caption(f"Risk Targets — Stop Loss: **₹{sl_price:,.2f}** | Take Profit: **₹{tp_price:,.2f}** | Active Mode: **{mode_lbl}**")
+
+            if st.button(f"⚡ Execute {q_side} {q_qty}x {selected_ticker} ({mode_lbl})", key="quick_chart_exec_btn", use_container_width=True):
+                with st.spinner(f"Placing {q_side} order for {selected_ticker}..."):
+                    res = execute_order(
+                        broker_name=q_broker,
+                        symbol=selected_ticker,
+                        transaction_type=q_side,
+                        quantity=q_qty,
+                        price=q_limit_price if q_type == "LIMIT" else 0.0,
+                        order_type="LMT" if q_type == "LIMIT" else "MKT"
+                    )
+                    st.success(f"✅ {res.get('message', 'Order placed successfully!')}")
+                    st.info(f"Order ID: `{res.get('order_id', '-')}` | Status: `{res.get('status', 'COMPLETE')}` | Broker: `{res.get('broker', q_broker)}`")
+

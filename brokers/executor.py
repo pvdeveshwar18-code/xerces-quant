@@ -20,23 +20,71 @@ SUPPORTED_BROKERS = [
 ]
 
 def _resolve_broker_credentials(broker_name: str, passed_creds: dict | None = None) -> dict:
-    """Resolve broker credentials from session_state or utils/credentials if not explicitly passed."""
+    """Resolve broker credentials from session_state, SQLite database, or utils/credentials."""
     creds = dict(passed_creds or {})
+    try:
+        from data.database import load_broker_credentials
+        db_creds = load_broker_credentials(broker_name) or {}
+    except Exception:
+        db_creds = {}
+
     if "Kotak Neo" in broker_name:
         if not creds.get("consumer_key"):
             global_k = cred.get_kotak_credentials()
-            creds["consumer_key"] = global_k.get("consumer_key") or st.session_state.get("neo_key", "")
-            creds["consumer_secret"] = st.session_state.get("neo_secret", "")
-            creds["mobile_number"] = global_k.get("mobile_number") or st.session_state.get("neo_mobile", "")
-            creds["client_code"] = global_k.get("client_code") or st.session_state.get("neo_code", "")
+            creds["consumer_key"] = (
+                global_k.get("consumer_key")
+                or st.session_state.get("neo_key", "")
+                or db_creds.get("consumer_key", "")
+            )
+            creds["consumer_secret"] = (
+                st.session_state.get("neo_secret", "")
+                or db_creds.get("consumer_secret", "")
+            )
+            creds["mobile_number"] = (
+                global_k.get("mobile_number")
+                or st.session_state.get("neo_mobile", "")
+                or db_creds.get("mobile_number", "")
+            )
+            creds["client_code"] = (
+                global_k.get("client_code")
+                or st.session_state.get("neo_code", "")
+                or db_creds.get("client_code", "")
+            )
     elif "Zerodha" in broker_name:
         if not creds.get("api_key"):
-            creds["api_key"] = st.session_state.get("kite_key", "")
-            creds["api_secret"] = st.session_state.get("kite_secret", "")
+            creds["api_key"] = (
+                st.session_state.get("kite_key")
+                or st.session_state.get("kite_k_in")
+                or db_creds.get("api_key", "")
+            )
+            creds["api_secret"] = (
+                st.session_state.get("kite_secret")
+                or st.session_state.get("kite_s_in")
+                or db_creds.get("api_secret", "")
+            )
+            creds["access_token"] = (
+                st.session_state.get("kite_token")
+                or db_creds.get("access_token", "")
+            )
     elif "Alpaca" in broker_name:
         if not creds.get("api_key"):
-            creds["api_key"] = st.session_state.get("alpaca_key", "")
-            creds["secret_key"] = st.session_state.get("alpaca_secret", "")
+            creds["api_key"] = (
+                st.session_state.get("alpaca_key")
+                or st.session_state.get("alpaca_k_in")
+                or db_creds.get("api_key", "")
+            )
+            creds["secret_key"] = (
+                st.session_state.get("alpaca_secret")
+                or st.session_state.get("alpaca_s_in")
+                or db_creds.get("secret_key", "")
+            )
+    elif "Angel One" in broker_name or "Upstox" in broker_name:
+        if not creds.get("api_key"):
+            creds["api_key"] = (
+                st.session_state.get("upstox_key")
+                or st.session_state.get("upstox_k_in")
+                or db_creds.get("api_key", "")
+            )
     return creds
 
 def execute_order(
@@ -81,11 +129,19 @@ def execute_order(
             adapter.authenticate()
             res = adapter.place_order(symbol=symbol, transaction_type=transaction_type, quantity=quantity, price=price, order_type=order_type)
         elif "Zerodha" in broker_name:
-            adapter = ZerodhaKiteAdapter(api_key=creds.get("api_key", ""), api_secret=creds.get("api_secret", ""))
-            res = adapter.place_order(symbol=symbol, transaction_type=transaction_type, quantity=quantity, price=price)
+            adapter = ZerodhaKiteAdapter(
+                api_key=creds.get("api_key", ""),
+                api_secret=creds.get("api_secret", ""),
+                access_token=creds.get("access_token", "")
+            )
+            res = adapter.place_order(symbol=symbol, transaction_type=transaction_type, quantity=quantity, price=price, order_type=order_type)
         elif "Alpaca" in broker_name:
-            adapter = AlpacaUSAdapter(api_key=creds.get("api_key", ""), secret_key=creds.get("secret_key", ""))
-            res = adapter.place_order(symbol=symbol, transaction_type=transaction_type, quantity=quantity, price=price)
+            adapter = AlpacaUSAdapter(
+                api_key=creds.get("api_key", ""),
+                secret_key=creds.get("secret_key", ""),
+                paper=False
+            )
+            res = adapter.place_order(symbol=symbol, transaction_type=transaction_type, quantity=quantity, price=price, order_type=order_type)
         else:
             res = {
                 "status": "COMPLETE",

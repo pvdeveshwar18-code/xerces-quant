@@ -28,8 +28,13 @@ class LiveMarketStreamer:
         self._load_credentials()
 
     def _load_credentials(self):
-        creds_json = load_broker_credentials(self.broker)
-        self.credentials = json.loads(creds_json) if creds_json else {}
+        creds = load_broker_credentials(self.broker)
+        if isinstance(creds, str):
+            try:
+                creds = json.loads(creds)
+            except Exception:
+                creds = {}
+        self.credentials = creds if isinstance(creds, dict) else {}
 
     def authenticate(self, api_key: str = "", api_secret: str = "", access_token: str = "") -> dict:
         """
@@ -42,7 +47,7 @@ class LiveMarketStreamer:
         if access_token:
             self.credentials["access_token"] = access_token
 
-        save_broker_credentials(self.broker, json.dumps(self.credentials))
+        save_broker_credentials(self.broker, self.credentials)
 
         # Real Zerodha KiteConnect authentication
         if "Zerodha" in self.broker and self.credentials.get("api_key") and self.credentials.get("access_token"):

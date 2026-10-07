@@ -79,19 +79,25 @@ def init_db():
 # Initialize DB schema on import
 init_db()
 
-def save_broker_credentials(broker_name: str, creds_dict: dict):
+def save_broker_credentials(broker_name: str, creds_dict: dict | str):
     """Save or update broker credentials in SQLite."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    if isinstance(creds_dict, dict):
+        payload = json.dumps(creds_dict)
+    elif isinstance(creds_dict, str):
+        payload = creds_dict
+    else:
+        payload = "{}"
     cursor.execute(
         "INSERT OR REPLACE INTO broker_credentials (broker_name, credentials_json) VALUES (?, ?)",
-        (broker_name, json.dumps(creds_dict))
+        (broker_name, payload)
     )
     conn.commit()
     conn.close()
 
 def load_broker_credentials(broker_name: str) -> dict:
-    """Load broker credentials from SQLite."""
+    """Load broker credentials from SQLite as a dictionary."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT credentials_json FROM broker_credentials WHERE broker_name = ?", (broker_name,))
@@ -99,7 +105,13 @@ def load_broker_credentials(broker_name: str) -> dict:
     conn.close()
     if row and row[0]:
         try:
-            return json.loads(row[0])
+            val = row[0]
+            if isinstance(val, dict):
+                return val
+            parsed = json.loads(val)
+            if isinstance(parsed, str):
+                parsed = json.loads(parsed)
+            return parsed if isinstance(parsed, dict) else {}
         except Exception:
             return {}
     return {}

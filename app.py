@@ -510,7 +510,8 @@ if active_tab == "📊 CHART":
         macd_v=macd_v, macd_sv=macd_sv, atr_val=atr_val, sl_price=sl_price,
         tp_price=tp_price, close=close, vol20=vol20, last=last,
         show_sma=show_sma, show_bb=show_bb, show_vol=show_vol,
-        buy_x=buy_x, buy_y=buy_y, sell_x=sell_x, sell_y=sell_y, str_clr=str_clr
+        buy_x=buy_x, buy_y=buy_y, sell_x=sell_x, sell_y=sell_y, str_clr=str_clr,
+        selected_name=selected_name, selected_ticker=selected_ticker
     )
 
 elif active_tab == "🔮 FORECAST":
