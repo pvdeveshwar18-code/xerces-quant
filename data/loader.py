@@ -5,6 +5,7 @@ import urllib.parse
 import xml.etree.ElementTree as ET
 import re
 import pandas as pd
+import numpy as np
 import yfinance as yf
 import streamlit as st
 

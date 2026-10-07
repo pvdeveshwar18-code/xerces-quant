@@ -73,7 +73,19 @@ def render_options_tab(selected_name: str, selected_ticker: str, close: float):
             st.plotly_chart(fig_oi, use_container_width=True)
 
         st.markdown('<p class="section-header">[ FULL OPTIONS CHAIN TABLE ]</p>', unsafe_allow_html=True)
-        chain_disp = df_chain[["CE LTP","CE OI","CE IV","Strike","PE IV","PE OI","PE LTP"]].copy()
+        from analytics.options_greeks import enrich_options_chain_with_greeks
+        df_chain_greeks = enrich_options_chain_with_greeks(df_chain, spot_price=close, days_to_expiry=7)
+
+        col_oc1, col_oc2 = st.columns([1, 2])
+        with col_oc1:
+            show_greeks = st.checkbox("Show Black-Scholes Greeks (Delta, Theta, Gamma, Vega)", value=True, key="opt_greeks_table_chk")
+
+        if show_greeks:
+            chain_cols = ["CE Delta", "CE Theta", "CE LTP", "CE OI", "CE IV", "Strike", "PE IV", "PE OI", "PE LTP", "PE Theta", "PE Delta"]
+        else:
+            chain_cols = ["CE LTP", "CE OI", "CE IV", "Strike", "PE IV", "PE OI", "PE LTP"]
+
+        chain_disp = df_chain_greeks[[c for c in chain_cols if c in df_chain_greeks.columns]].copy()
         chain_disp["ATM"] = df_chain["Strike"].apply(lambda s: "◀ ATM" if abs(s - close) == df_chain["Strike"].apply(lambda x: abs(x-close)).min() else "")
         st.dataframe(chain_disp.round(2), use_container_width=True, hide_index=True)
         st.download_button("⬇️ Download Options Chain",

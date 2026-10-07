@@ -114,5 +114,67 @@ def render_scanner_tab(SECTORS: dict, allocated_capital: float, risk_per_trade: 
         total_sc = b + s + h
         breadth = round(b / total_sc * 100, 1) if total_sc > 0 else 0
         st.caption(f"{len(disp)} stocks | BUY {b} | SELL {s} | HOLD {h} | Breadth {breadth}% bullish")
+
+        # Quick Execution on Scanned Stock & Batch Paper Deployment
+        if not disp.empty:
+            st.markdown("---")
+            st.markdown('#### ⚡ 1-Click Order Execution on Scanned Opportunities')
+            from brokers.executor import execute_order, SUPPORTED_BROKERS
+            paper_mode = st.session_state.get("paper_mode", st.session_state.get("config", {}).get("PAPER_MODE", True))
+            mode_badge = "🟢 Paper Trading" if paper_mode else "🔴 Live Broker"
+
+            col_s1, col_s2, col_s3, col_s4 = st.columns([1.5, 1, 1, 1])
+            with col_s1:
+                stock_choices = [f"{r['Stock']} ({r['Ticker']})" for _, r in disp.iterrows()]
+                selected_choice = st.selectbox("Select Candidate:", stock_choices, key="scan_exec_stock_sel")
+                sel_idx = stock_choices.index(selected_choice)
+                sel_row = disp.iloc[sel_idx]
+            with col_s2:
+                scan_brk = st.selectbox("Broker:", SUPPORTED_BROKERS, index=0, key="scan_exec_brk_sel")
+            with col_s3:
+                default_action = sel_row.get("Signal", "BUY")
+                scan_action = st.selectbox("Action:", ["BUY", "SELL"], index=0 if default_action != "SELL" else 1, key="scan_exec_act_sel")
+            with col_s4:
+                suggested_qty = int(sel_row.get("Qty", 10))
+                scan_qty = st.number_input("Order Qty:", min_value=1, value=suggested_qty, step=5, key="scan_exec_qty_in")
+
+            col_btn1, col_btn2 = st.columns([1, 1])
+            with col_btn1:
+                if st.button(f"🚀 Execute {scan_action} {scan_qty}x {sel_row['Ticker']} ({mode_badge})", use_container_width=True, key="scan_exec_single_btn"):
+                    raw_price_str = str(sel_row.get("Price", "0")).replace("₹", "").replace(",", "")
+                    try:
+                        px_val = float(raw_price_str)
+                    except ValueError:
+                        px_val = 0.0
+                    res = execute_order(
+                        broker_name=scan_brk,
+                        symbol=f"{sel_row['Ticker']}.NS",
+                        transaction_type=scan_action,
+                        quantity=scan_qty,
+                        price=px_val,
+                        order_type="MKT"
+                    )
+                    st.success(f"✅ {res.get('message', 'Order placed successfully!')}")
+                    st.info(f"Order ID: `{res.get('order_id', '-')}` | Broker: `{res.get('broker', scan_brk)}`")
+
+            with col_btn2:
+                buy_candidates = rdf[rdf["_sig"] == "BUY"]
+                deploy_label = f"📥 Batch Deploy All {len(buy_candidates)} BUY Signals to Paper Portfolio"
+                if st.button(deploy_label, use_container_width=True, key="scan_batch_deploy_btn", disabled=(len(buy_candidates) == 0)):
+                    with st.spinner("Batch-deploying scanned BUY signals..."):
+                        executed_count = 0
+                        for _, row in buy_candidates.iterrows():
+                            t_sym = f"{row['Ticker']}.NS"
+                            t_qty = max(1, int(row.get("Qty", 10)))
+                            execute_order(
+                                broker_name="Kotak Neo (NSE/BSE)",
+                                symbol=t_sym,
+                                transaction_type="BUY",
+                                quantity=t_qty,
+                                price=0.0,
+                                order_type="MKT"
+                            )
+                            executed_count += 1
+                        st.success(f"✅ Successfully deployed {executed_count} simulated paper positions into audit log & history!")
     else:
         st.info("Click RUN SCAN to populate.")
