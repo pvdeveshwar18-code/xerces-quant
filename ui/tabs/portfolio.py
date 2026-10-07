@@ -13,22 +13,32 @@ def render_portfolio_tab(allocated_capital: float):
     """Render Custom Portfolio Tracker & ROTATION ADVISOR tab.
     Includes optional loading of Kotak Neo portfolio via the global credentials.
     """
-    # ── SUBSECTION 1: KOTAK NEO LIVE PORTFOLIO CONNECTOR ────────────────────
+    # ── SUBSECTION 1: MULTI-BROKER LIVE PORTFOLIO CONNECTOR ────────────────────
     import streamlit as st
-    from utils.portfolio import fetch_kotak_portfolio
+    from utils.portfolio import fetch_broker_portfolio
 
-    col_btn1, col_btn2 = st.columns([1.5, 3])
-    with col_btn1:
-        if st.button("🔗 Fetch Kotak Neo Holdings", key="load_kotak_portfolio"):
-            with st.spinner("Connecting to Kotak Neo & fetching holdings…"):
-                data = fetch_kotak_portfolio(force_refresh=True)
-                st.session_state["kotak_portfolio_data"] = data
-                st.session_state["show_kotak_portfolio"] = True
+    col_b_sel, col_b_fetch = st.columns([1.5, 2])
+    with col_b_sel:
+        sel_brk_port = st.selectbox(
+            "Broker Account:",
+            ["Kotak Neo (NSE/BSE)", "Zerodha Kite Connect", "Alpaca US Trading"],
+            key="port_brk_select"
+        )
+    with col_b_fetch:
+        st.write("")
+        st.write("")
+        if st.button(f"🔗 Fetch {sel_brk_port.split(' ')[0]} Holdings", key="load_broker_portfolio_btn"):
+            with st.spinner(f"Connecting to {sel_brk_port} & fetching holdings…"):
+                data = fetch_broker_portfolio(broker_name=sel_brk_port, force_refresh=True)
+                st.session_state["broker_portfolio_data"] = data
+                st.session_state["broker_portfolio_name"] = sel_brk_port
+                st.session_state["show_broker_portfolio"] = True
                 if not data:
-                    st.info("No active holdings found in Kotak Neo account.")
+                    st.info(f"No active holdings found in {sel_brk_port} account.")
 
-    if st.session_state.get("show_kotak_portfolio") and st.session_state.get("kotak_portfolio_data"):
-        holdings = st.session_state["kotak_portfolio_data"]
+    if st.session_state.get("show_broker_portfolio") and st.session_state.get("broker_portfolio_data"):
+        holdings = st.session_state["broker_portfolio_data"]
+        brk_title = st.session_state.get("broker_portfolio_name", "BROKER")
         df_k = pd.DataFrame(holdings)
         if not df_k.empty:
             if "market_value" not in df_k.columns and "quantity" in df_k.columns and "last_price" in df_k.columns:
@@ -48,7 +58,7 @@ def render_portfolio_tab(allocated_capital: float):
             st.markdown(
                 f"""<div class="glass-card" style="margin-top:10px;margin-bottom:12px;">
                     <div style="display:flex;justify-content:space-between;align-items:center;">
-                        <span class="section-header" style="margin:0;">🏦 KOTAK NEO LIVE HOLDINGS</span>
+                        <span class="section-header" style="margin:0;">🏦 {brk_title.upper()} HOLDINGS</span>
                         <span style="font-family:'Space Mono',monospace;font-size:12px;color:{pnl_color};font-weight:700;">
                             P&L: {'+' if tot_pnl>=0 else ''}₹{tot_pnl:,.2f} ({'+' if tot_pnl_pct>=0 else ''}{tot_pnl_pct:.2f}%)
                         </span>
@@ -62,9 +72,9 @@ def render_portfolio_tab(allocated_capital: float):
                 unsafe_allow_html=True
             )
 
-            col_act1, col_act2, col_act3 = st.columns([1.5, 1, 3])
+            col_act1, col_act2 = st.columns([1.5, 1])
             with col_act1:
-                if st.button("📥 Import into Custom Tracker Below", key="import_kotak_btn"):
+                if st.button("📥 Import into Custom Tracker Below", key="import_broker_holdings_btn"):
                     imported_records = []
                     for h in holdings:
                         sym = str(h.get("symbol", "")).replace(".NS", "").replace(".BO", "").strip()
@@ -75,11 +85,11 @@ def render_portfolio_tab(allocated_capital: float):
                         })
                     if imported_records:
                         st.session_state["custom_portfolio"] = pd.DataFrame(imported_records)
-                        st.success("✅ Imported Kotak Neo holdings into Custom Portfolio Tracker!")
+                        st.success(f"✅ Imported {brk_title} holdings into Custom Portfolio Tracker!")
                         st.rerun()
             with col_act2:
-                if st.button("❌ Hide Kotak Holdings", key="hide_kotak_btn"):
-                    st.session_state["show_kotak_portfolio"] = False
+                if st.button("❌ Hide Holdings View", key="hide_broker_holdings_btn"):
+                    st.session_state["show_broker_portfolio"] = False
                     st.rerun()
 
             st.dataframe(df_k, use_container_width=True, hide_index=True)
@@ -298,6 +308,44 @@ def render_portfolio_tab(allocated_capital: float):
                         disp_df[["Stock", "Qty", "Buy Price", "Current Price", "Current Value", "P&L", "Projected 1Y Value", "Proj. 1Y %", "Advice"]],
                         use_container_width=True, hide_index=True
                     )
+
+                    # Capital Allocation Donut & Position P&L Visualizations
+                    valid_alloc = [r for r in analyzed_rows if r.get("Current Value") != "N/A"]
+                    if valid_alloc:
+                        col_chart1, col_chart2 = st.columns([1, 1])
+                        with col_chart1:
+                            fig_donut = go.Figure(data=[go.Pie(
+                                labels=[r["Stock"] for r in valid_alloc],
+                                values=[float(str(r["Current Value"]).replace("₹", "").replace(",", "")) for r in valid_alloc],
+                                hole=0.55,
+                                textinfo="label+percent",
+                                hoverinfo="label+value+percent",
+                                marker=dict(colors=["#00e87a", "#00c8ff", "#7c4dff", "#ffcc00", "#ff6b35", "#ff3355", "#00bcd4", "#e91e63"])
+                            )])
+                            fig_donut.update_layout(
+                                title=dict(text="Portfolio Capital Allocation", font=dict(color="#ddeeff", size=12)),
+                                height=280, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                font=dict(color="#ddeeff", family="Space Mono", size=10),
+                                margin=dict(l=10, r=10, t=30, b=10),
+                                legend=dict(bgcolor="rgba(7,18,32,0.5)", font=dict(size=9))
+                            )
+                            st.plotly_chart(fig_donut, use_container_width=True)
+
+                        with col_chart2:
+                            fig_pnl_bar = go.Figure(data=[go.Bar(
+                                x=[r["Stock"] for r in valid_alloc],
+                                y=[r["_pnl"] for r in valid_alloc],
+                                marker_color=["#00e87a" if r["_pnl"] >= 0 else "#ff3355" for r in valid_alloc]
+                            )])
+                            fig_pnl_bar.update_layout(
+                                title=dict(text="Unrealized P&L by Position (₹)", font=dict(color="#ddeeff", size=12)),
+                                height=280, paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                                font=dict(color="#ddeeff", family="Space Mono", size=10),
+                                margin=dict(l=10, r=10, t=30, b=10),
+                                xaxis=dict(gridcolor="rgba(0,200,255,0.04)"),
+                                yaxis=dict(gridcolor="rgba(0,200,255,0.04)")
+                            )
+                            st.plotly_chart(fig_pnl_bar, use_container_width=True)
 
                     st.markdown('<p class="section-header">[ 🛡️ PORTFOLIO ROTATION ADVISORY DETAILS ]</p>', unsafe_allow_html=True)
                     for item in analyzed_rows:
