@@ -77,5 +77,57 @@ def render_backtest_tab(df: pd.DataFrame, selected_name: str, backtest_strategy:
         st.dataframe(tdf.tail(30), use_container_width=True, hide_index=True)
         st.download_button("Download Trade Log (CSV)", tdf.to_csv(index=False).encode(),
                            f"{selected_name}_trades_friction_analyzed.csv", "text/csv")
+
+        st.markdown("---")
+        st.markdown('<p class="section-header">[ ⚡ STRATEGY AUTO-TRADER & LIVE ROUTING DESK ]</p>', unsafe_allow_html=True)
+        st.caption("Arm this backtested strategy to generate bracket orders and route live/paper execution to connected brokers.")
+
+        from analytics.strategy_bot import evaluate_live_strategy_signal, deploy_strategy_signal
+        live_eval = evaluate_live_strategy_signal(df, strategy_name=backtest_strategy)
+
+        col_sig1, col_sig2, col_sig3, col_sig4 = st.columns(4)
+        sig_action = live_eval["action"]
+        sig_clr = "#00e87a" if sig_action == "BUY" else "#ff3355" if sig_action == "SELL" else "#ffcc00"
+
+        with col_sig1:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Active Signal (Current Bar)</p><div class="glass-value" style="color:{sig_clr};">{sig_action}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Strength: {live_eval["strength"]}/100</p></div>', unsafe_allow_html=True)
+        with col_sig2:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Entry Reference</p><div class="glass-value" style="color:#ddeeff;">₹{live_eval["entry_price"]:,.2f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">RSI: {live_eval["rsi"]}</p></div>', unsafe_allow_html=True)
+        with col_sig3:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Dynamic Stop-Loss</p><div class="glass-value" style="color:#ff3355;">₹{live_eval["stop_loss"]:,.2f}</div><p style="font-size:10px;color:#ff3355;margin-top:2px;">Risk: ₹{live_eval["risk_per_share"]:.2f}/sh</p></div>', unsafe_allow_html=True)
+        with col_sig4:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Take-Profit Target</p><div class="glass-value" style="color:#00e87a;">₹{live_eval["take_profit"]:,.2f}</div><p style="font-size:10px;color:#00e87a;margin-top:2px;">R:R 1:{live_eval["risk_reward"]:.1f}</p></div>', unsafe_allow_html=True)
+
+        st.markdown(f"""
+        <div style="background:rgba(7,18,32,0.5);border-left:3px solid {sig_clr};padding:8px 12px;border-radius:4px;font-size:12px;color:#ddeeff;margin:8px 0 14px 0;">
+        <b>Signal Rationale:</b> {live_eval["rationale"]}
+        </div>
+        """, unsafe_allow_html=True)
+
+        col_dep1, col_dep2, col_dep3, col_dep4 = st.columns([1.2, 1, 1, 1.2])
+        with col_dep1:
+            dep_broker = st.selectbox("Execution Broker:", ["Kotak Neo (NSE/BSE)", "Zerodha Kite Connect", "Angel One SmartAPI", "Upstox Developer API", "Alpaca US Trading"], key=f"bt_dep_brk_{selected_name}")
+        with col_dep2:
+            dep_action = st.selectbox("Action:", ["BUY", "SELL"], index=0 if sig_action == "BUY" else 1, key=f"bt_dep_act_{selected_name}")
+        with col_dep3:
+            dep_qty = st.number_input("Deploy Quantity:", min_value=1, value=10, step=1, key=f"bt_dep_qty_{selected_name}")
+        with col_dep4:
+            st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+            if st.button("🚀 DEPLOY STRATEGY ORDER", use_container_width=True, key=f"bt_dep_btn_{selected_name}"):
+                with st.spinner(f"Routing {dep_action} strategy signal via {dep_broker}..."):
+                    try:
+                        res = deploy_strategy_signal(
+                            broker_name=dep_broker,
+                            symbol=selected_name,
+                            action=dep_action,
+                            quantity=dep_qty,
+                            price=live_eval["entry_price"],
+                            stop_loss=live_eval["stop_loss"],
+                            take_profit=live_eval["take_profit"]
+                        )
+                        st.success(f"✅ {res.get('message', 'Strategy order deployed successfully!')}")
+                        st.info(f"Order ID: `{res.get('order_id')}` | Status: `{res.get('status')}` | SL: ₹{live_eval['stop_loss']} | TP: ₹{live_eval['take_profit']}")
+                    except Exception as e:
+                        st.error(f"Execution Error: {e}")
     else:
         st.info("No signals generated. Try a different stock or strategy.")

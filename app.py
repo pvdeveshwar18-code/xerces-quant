@@ -444,6 +444,33 @@ _stock_ctx = {
     "atr": atr_val, "vol": vol20,
     "hi52": hi52, "lo52": lo52,
 }
+
+# Enrich with Capital Flow & Institutional Footprint
+try:
+    from analytics.capital_flow import compute_capital_flow
+    _flow_data = compute_capital_flow(df)
+    if _flow_data:
+        _f_sum = _flow_data.get("summary", {})
+        _f_div = _flow_data.get("divergence", {})
+        _stock_ctx["flow_sentiment"] = _f_sum.get("sentiment", "NEUTRAL")
+        _stock_ctx["net_capital_flow"] = _f_sum.get("net_capital_flow", 0.0)
+        _stock_ctx["whale_net"] = _f_sum.get("smart_money_net", 0.0)
+        _stock_ctx["whale_conviction"] = _f_sum.get("smart_money_ratio", 50.0)
+        _stock_ctx["retail_conviction"] = _f_sum.get("retail_ratio", 50.0)
+        _stock_ctx["flow_divergence"] = _f_div.get("type", "NONE")
+        _stock_ctx["cmf_20"] = _f_sum.get("cmf_20", 0.0)
+except Exception:
+    pass
+
+# Enrich with Tail Risk & Expected Shortfall
+try:
+    from analytics.risk_models import compute_cvar
+    _cvar_res = compute_cvar(df, confidence_level=0.95, portfolio_value=allocated_capital)
+    _stock_ctx["cvar_95_pct"] = _cvar_res.get("cvar_95_pct", 0.0)
+    _stock_ctx["var_95_pct"] = _cvar_res.get("var_95_pct", 0.0)
+except Exception:
+    pass
+
 st.session_state["_stock_ctx"] = _stock_ctx
 
 def _alert_lookup(t):

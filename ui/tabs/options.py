@@ -108,36 +108,46 @@ def render_options_tab(selected_name: str, selected_ticker: str, close: float):
 
     st.markdown("---")
     st.markdown('<p class="section-header">[ 📊 MULTI-LEG OPTIONS STRATEGY PAYOFF VISUALIZER & GREEKS ]</p>', unsafe_allow_html=True)
-    st.caption("Simulate multi-leg options strategies, payoff diagrams, and Black-Scholes Greeks.")
+    st.caption("Simulate multi-leg options strategies, payoff diagrams, T+0 curves, and Net Black-Scholes Greeks.")
     
-    col_opt1, col_opt2 = st.columns([1, 1.5])
+    col_opt1, col_opt2 = st.columns([1, 1.6])
     with col_opt1:
-        opt_strat = st.selectbox("Options Strategy:", ["Bull Call Spread", "Iron Condor", "Covered Call"], key="opt_strat_sel")
+        opt_strat = st.selectbox(
+            "Options Strategy:",
+            ["Bull Call Spread", "Bear Put Spread", "Iron Condor", "Long Straddle", "Long Strangle", "Covered Call", "Protective Put"],
+            key="opt_strat_sel"
+        )
         opt_dte = st.slider("Days to Expiration (DTE):", 1, 60, 30, key="opt_dte_sel")
         opt_iv = st.slider("Implied Volatility (IV %):", 10, 100, 25, step=5, key="opt_iv_sel") / 100.0
-        
-        try:
-            from ui.tabs.options_visualizer import calculate_option_greeks
-            greeks = calculate_option_greeks(spot=close, strike=close, dte=opt_dte, iv=opt_iv, option_type="call")
-            
-            st.markdown(f"""
-            <div class="glass-card">
-                <p class="glass-label">ATM OPTION GREEKS (CALL)</p>
-                <div style="font-size:11px;color:#ddeeff;line-height:1.7;margin-top:4px;">
-                    • <b>Delta (Δ)</b>: <span style="color:#00e87a;">{greeks['delta']}</span><br>
-                    • <b>Gamma (Γ)</b>: <span style="color:#00c8ff;">{greeks['gamma']}</span><br>
-                    • <b>Theta (Θ)</b>: <span style="color:#ff3355;">{greeks['theta']}</span><br>
-                    • <b>Vega (ν)</b>: <span style="color:#ffcc00;">{greeks['vega']}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        except Exception:
-            pass
 
     with col_opt2:
         try:
             from ui.tabs.options_visualizer import generate_payoff_diagram
-            fig_payoff = generate_payoff_diagram(spot_price=close, strategy=opt_strat)
+            fig_payoff, metrics = generate_payoff_diagram(spot_price=close, strategy=opt_strat, dte=opt_dte, iv=opt_iv)
             st.plotly_chart(fig_payoff, use_container_width=True)
         except Exception as e:
             st.warning(f"Payoff diagram error: {e}")
+            metrics = None
+
+    if metrics:
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Max Profit</p><div class="glass-value" style="color:#00e87a;">₹{metrics["max_profit"]:,.1f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Per share</p></div>', unsafe_allow_html=True)
+        with m2:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Max Loss</p><div class="glass-value" style="color:#ff3355;">₹{metrics["max_loss"]:,.1f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Per share</p></div>', unsafe_allow_html=True)
+        with m3:
+            rr_str = f"1 : {metrics['risk_reward']:.2f}" if metrics['risk_reward'] < 100 else "Unlimited"
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Risk:Reward</p><div class="glass-value" style="color:#00c8ff;">{rr_str}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Payoff profile</p></div>', unsafe_allow_html=True)
+        with m4:
+            be_str = ", ".join(f"₹{b:,.1f}" for b in metrics["breakevens"]) if metrics["breakevens"] else "None"
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Breakevens</p><div class="glass-value" style="color:#ffcc00;font-size:1rem;">{be_str}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Zero P&L target</p></div>', unsafe_allow_html=True)
+        with m5:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Net Delta (Δ)</p><div class="glass-value" style="color:{"#00e87a" if metrics["net_delta"]>=0 else "#ff3355"};">{metrics["net_delta"]:+.3f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Directional bias</p></div>', unsafe_allow_html=True)
+
+        g1, g2, g3 = st.columns(3)
+        with g1:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Net Gamma (Γ)</p><div class="glass-value" style="color:#00c8ff;">{metrics["net_gamma"]:.5f}</div></div>', unsafe_allow_html=True)
+        with g2:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Net Theta (Θ)</p><div class="glass-value" style="color:{"#00e87a" if metrics["net_theta"]>=0 else "#ff3355"};">{metrics["net_theta"]:+.2f} ₹/day</div></div>', unsafe_allow_html=True)
+        with g3:
+            st.markdown(f'<div class="glass-card"><p class="glass-label">Net Vega (ν)</p><div class="glass-value" style="color:#ffcc00;">{metrics["net_vega"]:+.2f} ₹/1% IV</div></div>', unsafe_allow_html=True)

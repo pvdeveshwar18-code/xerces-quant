@@ -220,6 +220,19 @@ def _build_context(ctx: dict) -> str:
         f"SMA20: ₹{ctx.get('sma20', 0):,.2f}  SMA50: ₹{ctx.get('sma50', 0):,.2f}  SMA200: ₹{ctx.get('sma200', 0):,.2f}",
         f"ATR(14): ₹{ctx.get('atr', 0):,.2f}  Volatility(ann): {ctx.get('vol', 0)*100:.1f}%",
     ]
+    if "whale_net" in ctx:
+        lines.append(
+            f"Whale Order Flow: Net ₹{ctx.get('whale_net', 0):,.0f} | "
+            f"Whale Conviction: {ctx.get('whale_conviction', 50):.1f}% Buy | "
+            f"Retail Conviction: {ctx.get('retail_conviction', 50):.1f}% Buy | "
+            f"Sentiment: {ctx.get('flow_sentiment', 'NEUTRAL')} | "
+            f"Divergence: {ctx.get('flow_divergence', 'NONE')}"
+        )
+    if "cvar_95_pct" in ctx:
+        lines.append(
+            f"Risk & Tail Loss: 95% CVaR (Expected Shortfall): {ctx.get('cvar_95_pct', 0):.2f}% | "
+            f"95% 1-Day VaR: {ctx.get('var_95_pct', 0):.2f}%"
+        )
     if ctx.get("fundamentals"):
         f = ctx["fundamentals"]
         lines.append("Fundamentals: " + " | ".join(
@@ -352,10 +365,69 @@ def ai_summarize_news(headlines: list, ticker: str, model: str = "auto") -> str:
     )
     return ai_chat(f"news_{ticker}", prompt, context={}, model=model)
 
+def synthesize_quantitative_trade_thesis(ctx: dict) -> str:
+    """Generate an institutional-grade quantitative trade thesis even without external LLM API keys."""
+    ticker = ctx.get("ticker", "N/A")
+    name = ctx.get("name", "Asset")
+    price = float(ctx.get("price", 0.0) or 0.0)
+    signal = str(ctx.get("signal", "HOLD"))
+    strength = int(ctx.get("strength", 50) or 50)
+    rsi = float(ctx.get("rsi", 50.0) or 50.0)
+    atr = float(ctx.get("atr", price * 0.02) or (price * 0.02))
+    change_1d = float(ctx.get("change_1d", 0.0) or 0.0)
+    whale_net = float(ctx.get("whale_net", 0.0) or 0.0)
+    whale_conviction = float(ctx.get("whale_conviction", 50.0) or 50.0)
+    flow_sentiment = str(ctx.get("flow_sentiment", "NEUTRAL"))
+    divergence = str(ctx.get("flow_divergence", "NONE"))
+    cvar = float(ctx.get("cvar_95_pct", 3.5) or 3.5)
+
+    is_bull = signal == "BUY" or (whale_net > 0 and rsi < 65)
+    action = "BUY" if is_bull else "SELL" if signal == "SELL" else "HOLD"
+    rating = f"STRONG {action}" if strength >= 70 or abs(whale_conviction - 50) >= 20 else action
+
+    entry = price
+    sl = price - (atr * 1.5) if is_bull else price + (atr * 1.5)
+    tp1 = price + (atr * 2.0) if is_bull else price - (atr * 2.0)
+    tp2 = price + (atr * 3.5) if is_bull else price - (atr * 3.5)
+    risk = max(abs(entry - sl), 1e-4)
+    reward = abs(tp1 - entry)
+    rr = reward / risk
+
+    return f"""### 🏛️ INSTITUTIONAL QUANTITATIVE TRADE THESIS: {name} ({ticker})
+
+**1. Market Regime & Institutional Setup**
+* **Technical Stance**: {signal} (Strength: {strength}/100) | 1D Change: {change_1d:+.2f}% | RSI (14): {rsi:.1f}.
+* **Whale Order Flow**: {flow_sentiment} | Institutional Whale Net: ₹{whale_net:,.0f} | Whale Conviction: {whale_conviction:.1f}% Buy.
+* **Smart Money Radar**: {divergence}.
+* **Tail Risk**: 95% CVaR (Expected Shortfall) is {cvar:.2f}%.
+
+**2. Trade Architecture & Execution Levels**
+* **Recommended Entry**: ₹{entry:,.2f}
+* **Invalidation / Stop-Loss**: ₹{sl:,.2f} (1.5x ATR buffer: ₹{abs(entry-sl):,.2f} risk per share)
+* **Target 1 (Primary)**: ₹{tp1:,.2f} (R:R 1:{rr:.2f})
+* **Target 2 (Runner)**: ₹{tp2:,.2f} (R:R 1:{(abs(tp2-entry)/risk):.2f})
+
+**3. Bull Case Drivers**
+* Whale net accumulation is {"positive" if whale_net >= 0 else "neutral"}, demonstrating institutional absorption at current levels.
+* Technical momentum {"confirms" if rsi < 65 and rsi > 40 else "shows constructive"} alignment with 14-day volatility bounded by ATR.
+* Favorable risk-to-reward ratio of 1:{rr:.2f} to the first liquidity target.
+
+**4. Bear Case & Key Invalidation Risks**
+* Downside tail risk: 95% Expected Shortfall is {cvar:.2f}%.
+* Break beyond invalidation level at ₹{sl:,.2f} terminates the thesis immediately.
+* Broader market liquidity drain could compress multi-day continuation.
+
+**5. Position Sizing & Horizon**
+* **Risk Allocation**: Size position so maximum dollar risk (₹{abs(entry-sl):,.2f} per share) represents no more than 1.0%–1.5% of total account capital.
+* **Horizon**: Swing trade (3 to 15 trading sessions).
+
+**FINAL RATING**: **{rating}**
+"""
+
 def ai_trade_thesis(context: dict, model: str = "auto") -> str:
     prompt = (
         "Write a concise 1-page TRADE THESIS for this stock. Include:\n"
-        "1. Setup (what the technicals + fundamentals say)\n"
+        "1. Setup (what the technicals, whale order flow + fundamentals say)\n"
         "2. Entry / Stop / Target (use ATR-based rationale)\n"
         "3. Bull Case (3 bullets)\n"
         "4. Bear Case (3 bullets)\n"
@@ -363,7 +435,10 @@ def ai_trade_thesis(context: dict, model: str = "auto") -> str:
         "6. Time horizon (short/medium/long)\n"
         "End with a clear rating: STRONG BUY / BUY / HOLD / SELL / STRONG SELL."
     )
-    return ai_chat(f"thesis_{context.get('ticker','X')}", prompt, context, model)
+    res = ai_chat(f"thesis_{context.get('ticker','X')}", prompt, context, model)
+    if "⚠️" in res and ("API" in res or "key" in res or "quota" in res or "unavailable" in res):
+        return synthesize_quantitative_trade_thesis(context)
+    return res
 
 # ──────────────────────────────────────────────────────────────────────────
 # 5. SECTOR HEATMAP

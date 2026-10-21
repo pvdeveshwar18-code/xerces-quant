@@ -83,6 +83,58 @@ def render_ai_analyst_tab(selected_name: str, selected_ticker: str):
         st.code(xp._build_context(_ctx), language="text")
 
     st.markdown("---")
+    # Section: AI Trade Execution Card
+    st.markdown('<p class="section-header">[ ⚡ AI TRADE RECOMMENDATION & 1-CLICK BROKER EXECUTION ]</p>', unsafe_allow_html=True)
+    st.caption("Actionable execution setup derived from AI Trade Thesis, ATR-based risk invalidation, and Whale Order Flow alignment.")
+
+    _price = float(_ctx.get("price", 100.0) or 100.0)
+    _atr = float(_ctx.get("atr", _price * 0.02) or (_price * 0.02))
+    _sig = str(_ctx.get("signal", "HOLD")).upper()
+    _is_buy = "BUY" in _sig or float(_ctx.get("whale_net", 0.0) or 0.0) > 0
+    _action = "BUY" if _is_buy else "SELL"
+    _sl = round(_price - (_atr * 1.5) if _is_buy else _price + (_atr * 1.5), 2)
+    _tp1 = round(_price + (_atr * 2.0) if _is_buy else _price - (_atr * 2.0), 2)
+    _tp2 = round(_price + (_atr * 3.5) if _is_buy else _price - (_atr * 3.5), 2)
+    _risk = max(abs(_price - _sl), 0.1)
+    _reward = abs(_tp1 - _price)
+    _rr = _reward / _risk
+
+    col_tc1, col_tc2, col_tc3, col_tc4 = st.columns(4)
+    with col_tc1:
+        st.markdown(f'<div class="glass-card"><p class="glass-label">Action</p><div class="glass-value" style="color:{"#00e87a" if _action=="BUY" else "#ff3355"};">{_action}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Signal: {_sig}</p></div>', unsafe_allow_html=True)
+    with col_tc2:
+        st.markdown(f'<div class="glass-card"><p class="glass-label">Target Entry</p><div class="glass-value" style="color:#ddeeff;">₹{_price:,.2f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Current Market Price</p></div>', unsafe_allow_html=True)
+    with col_tc3:
+        st.markdown(f'<div class="glass-card"><p class="glass-label">Stop-Loss (1.5x ATR)</p><div class="glass-value" style="color:#ff3355;">₹{_sl:,.2f}</div><p style="font-size:10px;color:#ff3355;margin-top:2px;">Risk: ₹{_risk:.2f}/sh</p></div>', unsafe_allow_html=True)
+    with col_tc4:
+        st.markdown(f'<div class="glass-card"><p class="glass-label">Target 1 (R:R 1:{_rr:.2f})</p><div class="glass-value" style="color:#00e87a;">₹{_tp1:,.2f}</div><p style="font-size:10px;color:#00e87a;margin-top:2px;">Target 2: ₹{_tp2:,.2f}</p></div>', unsafe_allow_html=True)
+
+    col_eb1, col_eb2, col_eb3, col_eb4 = st.columns([1.2, 1, 1, 1.2])
+    with col_eb1:
+        _exec_broker = st.selectbox("Route To Broker:", ["Kotak Neo (NSE/BSE)", "Zerodha Kite Connect", "Angel One SmartAPI", "Upstox Developer API", "Alpaca US Trading"], key=f"ai_exec_brk_{selected_ticker}")
+    with col_eb2:
+        _exec_side = st.selectbox("Order Side:", ["BUY", "SELL"], index=0 if _action=="BUY" else 1, key=f"ai_exec_side_{selected_ticker}")
+    with col_eb3:
+        _exec_qty = st.number_input("Order Quantity:", min_value=1, value=10, step=1, key=f"ai_exec_qty_{selected_ticker}")
+    with col_eb4:
+        st.markdown("<div style='height:28px;'></div>", unsafe_allow_html=True)
+        if st.button("🚀 EXECUTE AI TRADE ORDER", use_container_width=True, key=f"ai_exec_btn_{selected_ticker}"):
+            with st.spinner(f"Routing {_exec_side} order for {selected_ticker} to {_exec_broker}..."):
+                try:
+                    from brokers.executor import execute_order
+                    _res = execute_order(
+                        broker_name=_exec_broker,
+                        symbol=selected_ticker,
+                        transaction_type=_exec_side,
+                        quantity=_exec_qty,
+                        price=_price
+                    )
+                    st.success(f"✅ {_res['message']}")
+                    st.info(f"Order ID: `{_res['order_id']}` | Status: `{_res['status']}` | Broker: `{_res['broker']}`")
+                except Exception as e:
+                    st.error(f"Execution Error: {e}")
+
+    st.markdown("---")
     st.markdown("<p class='section-header'>[ 🔬 VIBE STRATEGY COPILOT & HKUDS MULTI-AGENT SWARM ]</p>", unsafe_allow_html=True)
     st.caption("Formulate custom strategies in natural language. Uses HKUDS Vibe-Trading multi-agent swarm principles (Macro, Quant, Risk agents) & 450+ Alpha Zoo factors.")
     
