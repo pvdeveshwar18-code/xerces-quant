@@ -4,6 +4,7 @@ import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from analytics.capital_flow import compute_capital_flow
+from data.loader import load_intraday, get_sector_peers, load_ohlcv
 
 def render_inflow_outflow_tab(
     df: pd.DataFrame,
@@ -12,26 +13,65 @@ def render_inflow_outflow_tab(
     close: float,
     currency_sym: str = "₹"
 ):
-    """Render Capital Inflow / Outflow & Order Size Analysis tab."""
+    """Render Institutional-Grade Capital Inflow / Outflow & Order Size Analysis tab."""
     st.markdown(f'<p class="section-header">[ 🌊 CAPITAL INFLOW / OUTFLOW & ORDER SIZE DYNAMICS — {selected_name} ]</p>', unsafe_allow_html=True)
-    st.caption("Track institutional versus retail money flow, order size tier distribution, cumulative capital delta (CVD), and whale accumulation divergences.")
+    st.caption("Institutional versus retail money flow, order size tier distribution, cumulative capital delta (CVD), price-level footprint, and whale accumulation divergences.")
 
-    if df is None or len(df) < 10:
+    if df is None or len(df) < 5:
         st.warning("Insufficient historical data to compute capital flow metrics.")
         return
 
+    # Section 0: Controls (Resolution & Timeframe)
+    ctrl_col1, ctrl_col2 = st.columns([1, 1.5])
+    with ctrl_col1:
+        res_mode = st.radio(
+            "Data Stream Resolution:",
+            ["Daily / Swing Tape", "5-Min Intraday Tape"],
+            horizontal=True,
+            key="flow_res_mode"
+        )
+    with ctrl_col2:
+        timeframe_sel = st.radio(
+            "Aggregation Horizon:",
+            ["1D (Today)", "5D (Weekly)", "20D (1-Month)", "60D (Quarterly)", "Full History"],
+            horizontal=True,
+            index=0,
+            key="flow_timeframe_sel"
+        )
+
+    # Determine dataset based on resolution mode
+    active_df = df
+    if res_mode == "5-Min Intraday Tape":
+        with st.spinner("Fetching 5-minute intraday tick tape..."):
+            intra_df = load_intraday(selected_ticker, interval="5m", period="5d")
+            if intra_df is not None and len(intra_df) >= 10:
+                active_df = intra_df
+            else:
+                st.info("Intraday 5m tape unavailable; falling back to Daily Swing tape.")
+
     # Compute Capital Flow metrics
-    flow_data = compute_capital_flow(df)
+    flow_data = compute_capital_flow(active_df)
     if not flow_data:
         st.error("Failed to compute capital flow analytics.")
         return
 
-    summary = flow_data["summary"]
-    tiers = flow_data["tiers"]
+    tf_map = {
+        "1D (Today)": "1D",
+        "5D (Weekly)": "5D",
+        "20D (1-Month)": "20D",
+        "60D (Quarterly)": "60D",
+        "Full History": "All"
+    }
+    tf_key = tf_map.get(timeframe_sel, "1D")
+    
+    # Active summary and tiers for selected timeframe
+    summary = flow_data["timeframes"].get(tf_key, flow_data["summary"])
+    tiers = summary.get("tiers", flow_data["tiers"])
     divergence = flow_data["divergence"]
     hist_df = flow_data["historical_flow_df"]
+    price_levels = flow_data.get("price_levels", pd.DataFrame())
 
-    # Section 1: KPI Top Cards
+    # Section 1: Top KPI Metric Cards
     tot_in = summary["total_inflow"]
     tot_out = summary["total_outflow"]
     net_val = summary["net_capital_flow"]
@@ -39,24 +79,25 @@ def render_inflow_outflow_tab(
     net_clr = "#00e87a" if net_val >= 0 else "#ff3355"
     net_sign = "+" if net_val >= 0 else ""
 
+    sm_net = summary["smart_money_net"]
+    sm_ratio = summary.get("smart_money_ratio", 50.0)
+    ret_net = summary["retail_net"]
+    ret_ratio = summary.get("retail_ratio", 50.0)
+
     k1, k2, k3, k4, k5, k6 = st.columns(6)
     
     with k1:
-        st.markdown(f'<div class="glass-card"><p class="glass-label">Total Inflow</p><div class="glass-value" style="color:#00e87a;">{currency_sym}{tot_in:,.0f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">{summary["inflow_ratio"]:.1f}% of volume</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card"><p class="glass-label">Total Inflow ({tf_key})</p><div class="glass-value" style="color:#00e87a;">{currency_sym}{tot_in:,.0f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">{summary["inflow_ratio"]:.1f}% of volume</p></div>', unsafe_allow_html=True)
     with k2:
-        st.markdown(f'<div class="glass-card"><p class="glass-label">Total Outflow</p><div class="glass-value" style="color:#ff3355;">{currency_sym}{tot_out:,.0f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">{100 - summary["inflow_ratio"]:.1f}% of volume</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card"><p class="glass-label">Total Outflow ({tf_key})</p><div class="glass-value" style="color:#ff3355;">{currency_sym}{tot_out:,.0f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">{100 - summary["inflow_ratio"]:.1f}% of volume</p></div>', unsafe_allow_html=True)
     with k3:
         st.markdown(f'<div class="glass-card"><p class="glass-label">Net Capital Flow</p><div class="glass-value" style="color:{net_clr};">{net_sign}{currency_sym}{net_val:,.0f}</div><p style="font-size:10px;color:{net_clr};margin-top:2px;">{net_sign}{net_pct:.2f}% Net</p></div>', unsafe_allow_html=True)
     with k4:
-        st.markdown(f'<div class="glass-card"><p class="glass-label">Flow Sentiment</p><div class="glass-value" style="color:{summary["sentiment_color"]};font-size:0.95rem;">{summary["sentiment"]}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Score: {summary["flow_score"]:+d}/100</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card"><p class="glass-label">Whale Net (XL+L)</p><div class="glass-value" style="color:{"#00e87a" if sm_net>=0 else "#ff3355"};">{"+" if sm_net>=0 else ""}{currency_sym}{sm_net:,.0f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Conviction: {sm_ratio:.1f}% Buy</p></div>', unsafe_allow_html=True)
     with k5:
-        cmf_val = summary["cmf_20"]
-        cmf_clr = "#00e87a" if cmf_val > 0.05 else "#ff3355" if cmf_val < -0.05 else "#ffcc00"
-        st.markdown(f'<div class="glass-card"><p class="glass-label">Chaikin MF (20)</p><div class="glass-value" style="color:{cmf_clr};">{cmf_val:+.3f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">{"Accumulation" if cmf_val>0 else "Distribution"}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card"><p class="glass-label">Retail Net (Small)</p><div class="glass-value" style="color:{"#00e87a" if ret_net>=0 else "#ff3355"};">{"+" if ret_net>=0 else ""}{currency_sym}{ret_net:,.0f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Conviction: {ret_ratio:.1f}% Buy</p></div>', unsafe_allow_html=True)
     with k6:
-        mfi_val = summary["mfi_14"]
-        mfi_clr = "#ff3355" if mfi_val > 80 else "#00e87a" if mfi_val < 20 else "#00c8ff"
-        st.markdown(f'<div class="glass-card"><p class="glass-label">MFI (14)</p><div class="glass-value" style="color:{mfi_clr};">{mfi_val:.1f}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">{"Overbought" if mfi_val>80 else "Oversold" if mfi_val<20 else "Balanced"}</p></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="glass-card"><p class="glass-label">Flow Sentiment</p><div class="glass-value" style="color:{summary["sentiment_color"]};font-size:0.95rem;">{summary["sentiment"]}</div><p style="font-size:10px;color:#6a90aa;margin-top:2px;">Score: {summary["flow_score"]:+d}/100</p></div>', unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -64,7 +105,7 @@ def render_inflow_outflow_tab(
     st.markdown(f"""
 <div class="glass-card" style="border-left: 4px solid {divergence['color']}; padding: 12px 16px; margin-bottom: 16px;">
     <div style="display:flex; justify-content:space-between; align-items:center;">
-        <span style="font-family:'Orbitron',sans-serif; font-weight:700; color:#ddeeff; font-size:14px;">📡 SMART MONEY FLOW DIVERGENCE: {divergence['type']}</span>
+        <span style="font-family:'Orbitron',sans-serif; font-weight:700; color:#ddeeff; font-size:14px;">📡 SMART MONEY FLOW RADAR: {divergence['type']}</span>
         <span style="font-family:'Space Mono',monospace; font-size:11px; font-weight:bold; color:{divergence['color']};">INSTITUTIONAL SIGNAL</span>
     </div>
     <div style="margin-top:6px; font-family:'Space Mono',monospace; font-size:12px; color:#a0aec0; line-height:1.5;">
@@ -74,12 +115,11 @@ def render_inflow_outflow_tab(
 """, unsafe_allow_html=True)
 
     # Section 3: Order Size Flow Matrix
-    st.markdown('<p class="section-header">[ 📊 ORDER SIZE TIER BREAKDOWN ]</p>', unsafe_allow_html=True)
+    st.markdown(f'<p class="section-header">[ 📊 ORDER SIZE TIER BREAKDOWN — {timeframe_sel} ]</p>', unsafe_allow_html=True)
     
     tier_rows = []
     for tier_name, tinfo in tiers.items():
         t_net = tinfo["net"]
-        t_clr = "#00e87a" if t_net >= 0 else "#ff3355"
         tier_rows.append({
             "Tier": tinfo["tier_label"],
             "Turnover Share": f"{tinfo['share_pct']:.1f}%",
@@ -92,22 +132,25 @@ def render_inflow_outflow_tab(
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # Section 4: Interactive Charts
+    # Section 4: Interactive Order Size Charts
     col_c1, col_c2 = st.columns([1.2, 1])
 
     with col_c1:
-        # Side-by-side Inflow vs Outflow Bar Chart by Tier
+        # Grouped Bar Chart: Inflow vs Outflow by Tier
         fig_bars = go.Figure()
         tier_names = list(tiers.keys())
         inflows = [tiers[t]["inflow"] for t in tier_names]
         outflows = [tiers[t]["outflow"] for t in tier_names]
+
+        fmt_factor = 1e5 if currency_sym == "₹" else 1e3
+        fmt_unit = "L" if currency_sym == "₹" else "K"
 
         fig_bars.add_trace(go.Bar(
             name="Inflow (Buying)",
             x=tier_names,
             y=inflows,
             marker=dict(color="#00e87a"),
-            text=[f"{currency_sym}{v/1e5:.1f}L" if currency_sym=="₹" else f"${v/1e3:.1f}K" for v in inflows],
+            text=[f"{currency_sym}{v/fmt_factor:.1f}{fmt_unit}" for v in inflows],
             textposition="auto"
         ))
         fig_bars.add_trace(go.Bar(
@@ -115,11 +158,11 @@ def render_inflow_outflow_tab(
             x=tier_names,
             y=outflows,
             marker=dict(color="#ff3355"),
-            text=[f"{currency_sym}{v/1e5:.1f}L" if currency_sym=="₹" else f"${v/1e3:.1f}K" for v in outflows],
+            text=[f"{currency_sym}{v/fmt_factor:.1f}{fmt_unit}" for v in outflows],
             textposition="auto"
         ))
         fig_bars.update_layout(
-            title=dict(text="Order Size Inflow vs. Outflow", font=dict(color="#00c8ff", size=13)),
+            title=dict(text=f"Order Size Inflow vs. Outflow ({timeframe_sel})", font=dict(color="#00c8ff", size=13)),
             barmode="group",
             height=320,
             paper_bgcolor="rgba(0,0,0,0)",
@@ -133,7 +176,7 @@ def render_inflow_outflow_tab(
         st.plotly_chart(fig_bars, use_container_width=True)
 
     with col_c2:
-        # Donut Chart: Inflow Distribution across order sizes
+        # Donut Chart: Inflow Allocation vs Outflow Allocation
         fig_donut = make_subplots(rows=1, cols=2, specs=[[{"type": "domain"}, {"type": "domain"}]],
                                   subplot_titles=["Inflow Allocation", "Outflow Allocation"])
 
@@ -171,7 +214,6 @@ def render_inflow_outflow_tab(
     # Section 5: Cumulative Net Capital Flow (CVD Timeline) vs Price Action
     st.markdown('<p class="section-header">[ 📈 CUMULATIVE CAPITAL FLOW & SMART MONEY CVD TIMELINE ]</p>', unsafe_allow_html=True)
     
-    # 60-day or available lookback
     plot_sub = hist_df.iloc[-90:] if len(hist_df) > 90 else hist_df
     plot_dates = plot_sub["Date"] if "Date" in plot_sub.columns else plot_sub.index
 
@@ -183,7 +225,7 @@ def render_inflow_outflow_tab(
         subplot_titles=[f"{selected_name} Price Action", "Cumulative Capital Flow & Institutional Net Delta"]
     )
 
-    # Row 1: Price Action
+    # Row 1: Candlestick Price Action
     fig_cvd.add_trace(go.Candlestick(
         x=plot_dates,
         open=plot_sub["Open"],
@@ -195,7 +237,7 @@ def render_inflow_outflow_tab(
         decreasing_line_color="#ff3355"
     ), row=1, col=1)
 
-    # Row 2: Cumulative Net Flows
+    # Row 2: Cumulative Flow Lines
     fig_cvd.add_trace(go.Scatter(
         x=plot_dates,
         y=plot_sub["Cum_Smart_Money_Net"],
@@ -221,7 +263,7 @@ def render_inflow_outflow_tab(
     ), row=2, col=1)
 
     fig_cvd.update_layout(
-        height=520,
+        height=500,
         paper_bgcolor="rgba(0,0,0,0)",
         plot_bgcolor="rgba(0,0,0,0)",
         font=dict(color="#ddeeff", family="Space Mono", size=10),
@@ -234,10 +276,122 @@ def render_inflow_outflow_tab(
     )
     st.plotly_chart(fig_cvd, use_container_width=True)
 
-    # Section 6: 1-Click Order Execution on Flow Signal
+    # Section 6: Daily Net Capital Flow Bar Delta & Price Footprint Profile
+    col_d1, col_d2 = st.columns([1.2, 1])
+
+    with col_d1:
+        st.markdown('<p class="section-header">[ 📊 DAILY NET FLOW DELTA & 10D SIGNAL ]</p>', unsafe_allow_html=True)
+        recent_sub = hist_df.iloc[-30:] if len(hist_df) > 30 else hist_df
+        r_dates = recent_sub["Date"] if "Date" in recent_sub.columns else recent_sub.index
+        net_bars = recent_sub["Net_Capital_Flow"]
+        bar_colors = ["#00e87a" if v >= 0 else "#ff3355" for v in net_bars]
+        ma_net = net_bars.rolling(10, min_periods=1).mean()
+
+        fig_delta = go.Figure()
+        fig_delta.add_trace(go.Bar(
+            x=r_dates,
+            y=net_bars,
+            marker_color=bar_colors,
+            name="Daily Net Flow"
+        ))
+        fig_delta.add_trace(go.Scatter(
+            x=r_dates,
+            y=ma_net,
+            name="10D Signal Trend",
+            line=dict(color="#00c8ff", width=2)
+        ))
+        fig_delta.update_layout(
+            height=320,
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(color="#ddeeff", family="Space Mono", size=10),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            yaxis=dict(gridcolor="rgba(0,200,255,0.05)", title=f"Net Delta ({currency_sym})"),
+            xaxis=dict(gridcolor="rgba(0,200,255,0.05)"),
+            margin=dict(l=10, r=10, t=30, b=10)
+        )
+        st.plotly_chart(fig_delta, use_container_width=True)
+
+    with col_d2:
+        st.markdown('<p class="section-header">[ 🎯 PRICE LEVEL FOOTPRINT PROFILE ]</p>', unsafe_allow_html=True)
+        if not price_levels.empty:
+            fig_fp = go.Figure()
+            fig_fp.add_trace(go.Bar(
+                y=price_levels["price_mid"],
+                x=price_levels["inflow"],
+                orientation="h",
+                name="Inflow (Demand)",
+                marker_color="#00e87a"
+            ))
+            fig_fp.add_trace(go.Bar(
+                y=price_levels["price_mid"],
+                x=-price_levels["outflow"],
+                orientation="h",
+                name="Outflow (Supply)",
+                marker_color="#ff3355"
+            ))
+            # Point of Control annotation
+            poc_row = price_levels[price_levels["is_poc"]]
+            if not poc_row.empty:
+                poc_price = float(poc_row["price_mid"].iloc[0])
+                fig_fp.add_hline(y=poc_price, line_dash="dash", line_color="#ffcc00",
+                                 annotation_text=f"POC: {currency_sym}{poc_price:,.1f}",
+                                 annotation_position="bottom right")
+
+            fig_fp.update_layout(
+                barmode="overlay",
+                height=320,
+                paper_bgcolor="rgba(0,0,0,0)",
+                plot_bgcolor="rgba(0,0,0,0)",
+                font=dict(color="#ddeeff", family="Space Mono", size=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+                xaxis=dict(gridcolor="rgba(0,200,255,0.05)", title="Outflow ◄ | ► Inflow"),
+                yaxis=dict(gridcolor="rgba(0,200,255,0.05)", title="Price Level"),
+                margin=dict(l=10, r=10, t=30, b=10)
+            )
+            st.plotly_chart(fig_fp, use_container_width=True)
+        else:
+            st.info("Price footprint profile unavailable.")
+
+    # Section 7: Sector Whale Radar (Compare Inflow across Peers)
+    with st.expander("📡  Sector Whale Radar: Compare Capital Inflows across Peers", expanded=False):
+        st.caption("Scans and ranks sector peers side-by-side to detect where institutional capital is rotating.")
+        sector_name, peers = get_sector_peers(selected_ticker, max_peers=4)
+        
+        if peers:
+            radar_tickers = [selected_ticker] + [p for p in peers if p != selected_ticker]
+            radar_rows = []
+            
+            for tkr in radar_tickers:
+                peer_df = df if tkr == selected_ticker else load_ohlcv(tkr, period="1mo")
+                if peer_df is not None and len(peer_df) >= 5:
+                    p_res = compute_capital_flow(peer_df)
+                    if p_res:
+                        p_sum = p_res["summary"]
+                        p_div = p_res["divergence"]
+                        p_close = float(peer_df["Close"].iloc[-1])
+                        p_net = p_sum["net_capital_flow"]
+                        p_sm = p_sum["smart_money_net"]
+                        radar_rows.append({
+                            "Ticker": tkr,
+                            "Last Price": f"{currency_sym}{p_close:,.2f}",
+                            f"Total Net ({currency_sym})": f"{'+' if p_net>=0 else ''}{currency_sym}{p_net:,.0f}",
+                            f"Whale Net ({currency_sym})": f"{'+' if p_sm>=0 else ''}{currency_sym}{p_sm:,.0f}",
+                            "Whale Conviction": f"{p_sum.get('smart_money_ratio', 50.0):.1f}%",
+                            "Flow Sentiment": p_sum["sentiment"],
+                            "Radar Signal": p_div["type"]
+                        })
+
+            if radar_rows:
+                radar_table = pd.DataFrame(radar_rows)
+                st.dataframe(radar_table, use_container_width=True, hide_index=True)
+        else:
+            st.info("No sector peers identified for this asset.")
+
+    # Section 8: Export & 1-Click Order Execution Bridge
     st.markdown("---")
-    st.markdown('<p class="section-header">[ ⚡ 1-CLICK BROKER EXECUTION ON FLOW SIGNAL ]</p>', unsafe_allow_html=True)
-    st.caption("Capitalize on detected whale accumulation or distribution instantly across your connected broker accounts.")
+    st.markdown('<p class="section-header">[ ⚡ 1-CLICK BROKER EXECUTION & DATA EXPORT ]</p>', unsafe_allow_html=True)
+    st.caption("Capitalize on detected whale accumulation or export calculated order flow data for quantitative research.")
 
     col_e1, col_e2, col_e3, col_e4 = st.columns([1.2, 1, 1, 1.2])
     with col_e1:
@@ -268,3 +422,17 @@ def render_inflow_outflow_tab(
                     st.info(f"Order ID: `{res['order_id']}` | Status: `{res['status']}` | Broker: `{res['broker']}`")
                 except Exception as e:
                     st.error(f"Execution Error: {e}")
+
+    # Export CSV
+    export_df = hist_df[["Close", "Volume", "Turnover", "Total_Inflow", "Total_Outflow",
+                         "Net_Capital_Flow", "XL_Net", "L_Net", "M_Net", "S_Net",
+                         "Cum_Net_Flow", "Cum_Smart_Money_Net", "Cum_Retail_Net",
+                         "CMF_20", "MFI_14"]].copy()
+    csv_bytes = export_df.to_csv().encode("utf-8")
+    st.download_button(
+        label="⬇️ Download Complete Inflow/Outflow Dataset (CSV)",
+        data=csv_bytes,
+        file_name=f"{selected_ticker}_inflow_outflow_flow.csv",
+        mime="text/csv",
+        use_container_width=True
+    )

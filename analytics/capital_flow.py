@@ -1,7 +1,8 @@
 """
 Capital Flow / Inflow-Outflow & Order Size Analytics Engine.
 Calculates institutional order size tier distribution (Extra-Large, Large, Medium, Small),
-inflow vs. outflow capital dynamics, cumulative capital flow (CVD), and Smart Money divergence.
+inflow vs. outflow capital dynamics, multi-timeframe aggregations (1D, 5D, 20D, 60D, All),
+price-level order flow (Footprint Profile), and Smart Money divergence.
 """
 
 from typing import Dict, Any, List, Optional
@@ -19,7 +20,9 @@ def compute_capital_flow(
     Returns:
         dict containing:
             - summary: 1D total inflow, outflow, net flow, and sentiment score
-            - tiers: Breakdown across Extra-Large, Large, Medium, Small orders
+            - tiers: Breakdown across Extra-Large, Large, Medium, Small orders for 1D
+            - timeframes: Aggregated flow metrics for 1D, 5D, 20D, 60D, and All
+            - price_levels: Price-level footprint order flow distribution
             - historical_flow_df: DataFrame with daily Inflow, Outflow, Net, and Cumulative Flows
             - divergence: Detected smart money divergence signals
             - cmf_20: 20-period Chaikin Money Flow
@@ -148,38 +151,122 @@ def compute_capital_flow(
     mfr = pos_flow_sum / neg_flow_sum
     work_df["MFI_14"] = 100.0 - (100.0 / (1.0 + mfr))
 
-    # Summary of most recent period (Today / Last Candle)
+    # Helper function to summarize any slice of work_df
+    def _summarize_slice(slice_df: pd.DataFrame) -> Dict[str, Any]:
+        tot_in = float(slice_df["Total_Inflow"].sum())
+        tot_out = float(slice_df["Total_Outflow"].sum())
+        net_f = tot_in - tot_out
+        tot_turn = float(slice_df["Turnover"].sum())
+        
+        net_pct = (net_f / tot_turn * 100.0) if tot_turn > 0 else 0.0
+        in_ratio = (tot_in / tot_turn * 100.0) if tot_turn > 0 else 50.0
+
+        xl_in = float(slice_df["XL_Inflow"].sum())
+        xl_out = float(slice_df["XL_Outflow"].sum())
+        xl_net = xl_in - xl_out
+
+        l_in = float(slice_df["L_Inflow"].sum())
+        l_out = float(slice_df["L_Outflow"].sum())
+        l_net = l_in - l_out
+
+        m_in = float(slice_df["M_Inflow"].sum())
+        m_out = float(slice_df["M_Outflow"].sum())
+        m_net = m_in - m_out
+
+        s_in = float(slice_df["S_Inflow"].sum())
+        s_out = float(slice_df["S_Outflow"].sum())
+        s_net = s_in - s_out
+
+        sm_net = xl_net + l_net
+        sm_turnover = (xl_in + xl_out) + (l_in + l_out)
+        sm_ratio = ((xl_in + l_in) / sm_turnover * 100.0) if sm_turnover > 0 else 50.0
+
+        retail_net = s_net
+        retail_turnover = s_in + s_out
+        retail_ratio = (s_in / retail_turnover * 100.0) if retail_turnover > 0 else 50.0
+
+        if net_pct > 10.0 and sm_net > 0:
+            sentiment = "STRONG INFLOW (Whale Accumulation)"
+            sentiment_clr = "#00e87a"
+            score = min(100, int(50 + net_pct * 2.5))
+        elif net_pct > 0:
+            sentiment = "MILD INFLOW (Net Buying)"
+            sentiment_clr = "#00c8ff"
+            score = min(100, int(50 + net_pct))
+        elif net_pct < -10.0 and sm_net < 0:
+            sentiment = "HEAVY OUTFLOW (Whale Distribution)"
+            sentiment_clr = "#ff3355"
+            score = max(-100, int(-50 + net_pct * 2.5))
+        elif net_pct < 0:
+            sentiment = "MILD OUTFLOW (Net Selling)"
+            sentiment_clr = "#ffcc00"
+            score = max(-100, int(net_pct))
+        else:
+            sentiment = "NEUTRAL (Balanced Flow)"
+            sentiment_clr = "#6a90aa"
+            score = 0
+
+        tiers_slice = {
+            "Extra-Large": {
+                "tier_label": "Extra-Large Orders (Institutions / Whales)",
+                "inflow": xl_in,
+                "outflow": xl_out,
+                "net": xl_net,
+                "share_pct": ((xl_in + xl_out) / tot_turn * 100.0) if tot_turn > 0 else 25.0,
+            },
+            "Large": {
+                "tier_label": "Large Orders (HNIs / Prop Desks)",
+                "inflow": l_in,
+                "outflow": l_out,
+                "net": l_net,
+                "share_pct": ((l_in + l_out) / tot_turn * 100.0) if tot_turn > 0 else 25.0,
+            },
+            "Medium": {
+                "tier_label": "Medium Orders (Active Traders)",
+                "inflow": m_in,
+                "outflow": m_out,
+                "net": m_net,
+                "share_pct": ((m_in + m_out) / tot_turn * 100.0) if tot_turn > 0 else 25.0,
+            },
+            "Small": {
+                "tier_label": "Small Orders (Retail Traders)",
+                "inflow": s_in,
+                "outflow": s_out,
+                "net": s_net,
+                "share_pct": ((s_in + s_out) / tot_turn * 100.0) if tot_turn > 0 else 25.0,
+            },
+        }
+
+        return {
+            "total_inflow": tot_in,
+            "total_outflow": tot_out,
+            "net_capital_flow": net_f,
+            "net_flow_pct": net_pct,
+            "inflow_ratio": in_ratio,
+            "smart_money_net": sm_net,
+            "smart_money_ratio": sm_ratio,
+            "retail_net": retail_net,
+            "retail_ratio": retail_ratio,
+            "sentiment": sentiment,
+            "sentiment_color": sentiment_clr,
+            "flow_score": score,
+            "tiers": tiers_slice,
+        }
+
+    # Generate Timeframe Summaries: 1D, 5D, 20D, 60D, All
+    timeframes = {}
+    timeframes["1D"] = _summarize_slice(work_df.iloc[-1:])
+    timeframes["5D"] = _summarize_slice(work_df.iloc[-min(5, len(work_df)):])
+    timeframes["20D"] = _summarize_slice(work_df.iloc[-min(20, len(work_df)):])
+    timeframes["60D"] = _summarize_slice(work_df.iloc[-min(60, len(work_df)):])
+    timeframes["All"] = _summarize_slice(work_df)
+
+    # 1D Summary & Tiers (Backwards compatibility)
     last_row = work_df.iloc[-1]
-    
-    total_in = float(last_row["Total_Inflow"])
-    total_out = float(last_row["Total_Outflow"])
-    net_flow = float(last_row["Net_Capital_Flow"])
-    total_turnover = float(last_row["Turnover"])
-    
-    net_flow_pct = (net_flow / total_turnover * 100.0) if total_turnover > 0 else 0.0
-    inflow_ratio = (total_in / total_turnover * 100.0) if total_turnover > 0 else 50.0
-
-    # Institutional Smart Money Net (Extra-Large + Large)
-    sm_net = float(last_row["XL_Net"] + last_row["L_Net"])
-    retail_net = float(last_row["S_Net"])
-
-    # Sentiment Classification
-    if net_flow_pct > 15.0 and sm_net > 0:
-        sentiment = "STRONG INFLOW (Whale Accumulation)"
-        sentiment_clr = "#00e87a"
-        score = min(100, int(50 + net_flow_pct * 2))
-    elif net_flow_pct > 0:
-        sentiment = "MILD INFLOW (Net Buying)"
-        sentiment_clr = "#00c8ff"
-        score = int(50 + net_flow_pct)
-    elif net_flow_pct < -15.0 and sm_net < 0:
-        sentiment = "HEAVY OUTFLOW (Whale Distribution)"
-        sentiment_clr = "#ff3355"
-        score = max(-100, int(-50 + net_flow_pct * 2))
-    else:
-        sentiment = "MILD OUTFLOW (Net Selling)"
-        sentiment_clr = "#ffcc00"
-        score = int(net_flow_pct)
+    summary_1d = timeframes["1D"]
+    summary_1d["cmf_20"] = float(last_row["CMF_20"])
+    summary_1d["mfi_14"] = float(last_row["MFI_14"])
+    tiers_1d = summary_1d["tiers"]
 
     # 6. Divergence Detection over lookback (default 20 candles)
     n_lookback = min(lookback_days, len(work_df) - 1)
@@ -208,54 +295,14 @@ def compute_capital_flow(
         divergence_desc = "Institutional outflow confirming downward pressure."
         divergence_clr = "#ff3355"
 
-    # Tier breakdown data
-    tiers = {
-        "Extra-Large": {
-            "tier_label": "Extra-Large Orders (Institutions / Whales)",
-            "inflow": float(last_row["XL_Inflow"]),
-            "outflow": float(last_row["XL_Outflow"]),
-            "net": float(last_row["XL_Net"]),
-            "share_pct": float(xl_share.iloc[-1] * 100.0),
-        },
-        "Large": {
-            "tier_label": "Large Orders (HNIs / Prop Desks)",
-            "inflow": float(last_row["L_Inflow"]),
-            "outflow": float(last_row["L_Outflow"]),
-            "net": float(last_row["L_Net"]),
-            "share_pct": float(l_share.iloc[-1] * 100.0),
-        },
-        "Medium": {
-            "tier_label": "Medium Orders (Active Traders)",
-            "inflow": float(last_row["M_Inflow"]),
-            "outflow": float(last_row["M_Outflow"]),
-            "net": float(last_row["M_Net"]),
-            "share_pct": float(m_share.iloc[-1] * 100.0),
-        },
-        "Small": {
-            "tier_label": "Small Orders (Retail Traders)",
-            "inflow": float(last_row["S_Inflow"]),
-            "outflow": float(last_row["S_Outflow"]),
-            "net": float(last_row["S_Net"]),
-            "share_pct": float(s_share.iloc[-1] * 100.0),
-        },
-    }
+    # 7. Price-Level Order Flow Profile (Footprint distribution across price brackets)
+    price_levels = compute_price_level_order_flow(work_df.iloc[-min(60, len(work_df)):], num_buckets=12)
 
     return {
-        "summary": {
-            "total_inflow": total_in,
-            "total_outflow": total_out,
-            "net_capital_flow": net_flow,
-            "net_flow_pct": net_flow_pct,
-            "inflow_ratio": inflow_ratio,
-            "smart_money_net": sm_net,
-            "retail_net": retail_net,
-            "sentiment": sentiment,
-            "sentiment_color": sentiment_clr,
-            "flow_score": score,
-            "cmf_20": float(last_row["CMF_20"]),
-            "mfi_14": float(last_row["MFI_14"]),
-        },
-        "tiers": tiers,
+        "summary": summary_1d,
+        "tiers": tiers_1d,
+        "timeframes": timeframes,
+        "price_levels": price_levels,
         "divergence": {
             "type": divergence_type,
             "description": divergence_desc,
@@ -265,3 +312,65 @@ def compute_capital_flow(
         },
         "historical_flow_df": work_df,
     }
+
+
+def compute_price_level_order_flow(flow_df: pd.DataFrame, num_buckets: int = 12) -> pd.DataFrame:
+    """
+    Computes horizontal price-level capital distribution (Inflow, Outflow, and Net Footprint)
+    across discrete price levels over the lookback window.
+    """
+    if flow_df is None or flow_df.empty:
+        return pd.DataFrame()
+
+    min_p = float(flow_df["Low"].min())
+    max_p = float(flow_df["High"].max())
+    if min_p >= max_p:
+        max_p = min_p * 1.05
+
+    bins = np.linspace(min_p, max_p, num_buckets + 1)
+    bucket_data = []
+
+    for i in range(num_buckets):
+        p_low = bins[i]
+        p_high = bins[i + 1]
+        p_mid = (p_low + p_high) / 2.0
+
+        # Find rows whose high/low overlaps with this price bin
+        mask = (flow_df["Low"] <= p_high) & (flow_df["High"] >= p_low)
+        subset = flow_df[mask]
+
+        if not subset.empty:
+            # Weight by price overlap factor
+            overlap = np.minimum(subset["High"], p_high) - np.maximum(subset["Low"], p_low)
+            span = np.maximum(subset["High"] - subset["Low"], 1e-4)
+            weight = np.clip(overlap / span, 0.05, 1.0)
+
+            bin_inflow = float((subset["Total_Inflow"] * weight).sum())
+            bin_outflow = float((subset["Total_Outflow"] * weight).sum())
+            bin_xl_net = float((subset["XL_Net"] * weight).sum())
+        else:
+            bin_inflow = 0.0
+            bin_outflow = 0.0
+            bin_xl_net = 0.0
+
+        bin_net = bin_inflow - bin_outflow
+        bucket_data.append({
+            "price_low": p_low,
+            "price_high": p_high,
+            "price_mid": p_mid,
+            "price_label": f"{p_mid:,.2f}",
+            "inflow": bin_inflow,
+            "outflow": bin_outflow,
+            "net_flow": bin_net,
+            "smart_money_net": bin_xl_net,
+            "total_turnover": bin_inflow + bin_outflow,
+        })
+
+    bdf = pd.DataFrame(bucket_data)
+    if not bdf.empty and bdf["total_turnover"].max() > 0:
+        poc_idx = bdf["total_turnover"].idxmax()
+        bdf["is_poc"] = False
+        bdf.loc[poc_idx, "is_poc"] = True
+    else:
+        bdf["is_poc"] = False
+    return bdf

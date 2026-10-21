@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 import pandas as pd
-from analytics.capital_flow import compute_capital_flow
+from analytics.capital_flow import compute_capital_flow, compute_price_level_order_flow
 
 class TestCapitalFlow(unittest.TestCase):
     def setUp(self):
@@ -33,6 +33,8 @@ class TestCapitalFlow(unittest.TestCase):
         res = compute_capital_flow(self.df)
         self.assertIn("summary", res)
         self.assertIn("tiers", res)
+        self.assertIn("timeframes", res)
+        self.assertIn("price_levels", res)
         self.assertIn("divergence", res)
         self.assertIn("historical_flow_df", res)
 
@@ -47,6 +49,31 @@ class TestCapitalFlow(unittest.TestCase):
         # Net flow = Inflow - Outflow
         expected_net = summary["total_inflow"] - summary["total_outflow"]
         self.assertAlmostEqual(summary["net_capital_flow"], expected_net, places=2)
+
+    def test_multi_timeframes(self):
+        res = compute_capital_flow(self.df)
+        tf = res["timeframes"]
+        for key in ["1D", "5D", "20D", "60D", "All"]:
+            self.assertIn(key, tf)
+            self.assertIn("total_inflow", tf[key])
+            self.assertIn("total_outflow", tf[key])
+            self.assertIn("net_capital_flow", tf[key])
+            self.assertIn("smart_money_ratio", tf[key])
+            self.assertIn("retail_ratio", tf[key])
+            self.assertIn("tiers", tf[key])
+
+    def test_price_level_footprint(self):
+        res = compute_capital_flow(self.df)
+        pl = res["price_levels"]
+        self.assertIsInstance(pl, pd.DataFrame)
+        self.assertFalse(pl.empty)
+        self.assertIn("price_mid", pl.columns)
+        self.assertIn("inflow", pl.columns)
+        self.assertIn("outflow", pl.columns)
+        self.assertIn("net_flow", pl.columns)
+        self.assertIn("is_poc", pl.columns)
+        # There should be exactly one Point of Control (POC)
+        self.assertEqual(pl["is_poc"].sum(), 1)
 
     def test_order_size_tier_breakdown(self):
         res = compute_capital_flow(self.df)
