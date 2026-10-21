@@ -11,6 +11,18 @@ def render_journal_tab(selected_name: str, close: float, backtest_strategy: str)
 
     _j = xp.load_journal()
 
+    col_j_top1, col_j_top2 = st.columns([1.5, 1])
+    with col_j_top2:
+        if st.button("📥 Sync from Execution Audit Log", key="sync_audit_to_journal_btn", use_container_width=True):
+            from utils.journal import sync_audit_to_journal
+            _j, count = sync_audit_to_journal(_j)
+            if count > 0:
+                xp.save_journal(_j)
+                st.success(f"✅ Synced {count} executed orders into Trade Journal!")
+                st.rerun()
+            else:
+                st.info("All audit log orders are already synced to the journal (or no orders available).")
+
     with st.expander("➕ Add trade entry", expanded=(_j.empty)):
         jc1, jc2, jc3 = st.columns(3)
         with jc1:
