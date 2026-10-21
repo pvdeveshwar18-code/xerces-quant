@@ -34,6 +34,7 @@ from ui.tabs.scanner import render_scanner_tab
 from ui.tabs.risk import render_risk_tab
 from ui.tabs.portfolio import render_portfolio_tab
 from ui.tabs.fii_dii import render_fii_dii_tab
+from ui.tabs.inflow_outflow import render_inflow_outflow_tab
 from ui.tabs.options import render_options_tab
 from ui.tabs.fundamentals import render_fundamentals_tab
 from ui.tabs.news import render_news_tab
@@ -485,7 +486,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
 TAB_OPTIONS = [
     "📊 CHART", "🔮 FORECAST", "📈 BACKTEST", "📡 SCANNER",
-    "🛡️ RISK", "🛒 ORDER", "💼 PORTFOLIO", "📊 FII/DII", "🎯 OPTIONS", "📋 FUNDAMENTALS", "📰 NEWS",
+    "🛡️ RISK", "🛒 ORDER", "💼 PORTFOLIO", "📊 FII/DII", "🌊 INFLOW/OUTFLOW", "🎯 OPTIONS", "📋 FUNDAMENTALS", "📰 NEWS",
     "🔥 HEATMAP", "🔄 COMPARE", "🤖 AI ANALYST", "📓 JOURNAL", "📄 EXPORT",
     "❓ MANUAL",
 ]
@@ -548,6 +549,15 @@ elif active_tab == "💼 PORTFOLIO":
 
 elif active_tab == "📊 FII/DII":
     render_fii_dii_tab()
+
+elif active_tab == "🌊 INFLOW/OUTFLOW":
+    render_inflow_outflow_tab(
+        df=df,
+        selected_name=selected_name,
+        selected_ticker=selected_ticker,
+        close=close,
+        currency_sym=currency_sym
+    )
 
 elif active_tab == "🎯 OPTIONS":
     render_options_tab(selected_name=selected_name, selected_ticker=selected_ticker, close=close)
