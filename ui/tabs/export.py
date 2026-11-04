@@ -5,27 +5,27 @@ import xerces_plus as xp
 from data.loader import fetch_fundamentals, fetch_news
 
 def render_export_tab(df: pd.DataFrame, selected_name: str, selected_ticker: str, trades: list = None):
-    """Render PDF & Excel Reports Generator tab."""
+    """Render PDF, HTML & Excel Reports Generator tab."""
     st.markdown(f'<p class="section-header">[ 📄 EXPORT REPORTS — {selected_name} ]</p>', unsafe_allow_html=True)
-    st.caption("Generate a shareable PDF report or Excel workbook with all analytics on this stock.")
+    st.caption("Generate shareable institutional research reports (PDF / HTML Tearsheet) or an Excel analytics workbook.")
 
-    ec1, ec2 = st.columns(2)
+    ec1, ec2, ec3 = st.columns(3)
 
     with ec1:
         st.markdown('<div class="glass-card">'
                     '<p class="glass-label">📄 PDF STOCK REPORT</p>'
                     '<div class="glass-value" style="color:#00c8ff;font-size:1.1rem;">One-page analyst report</div>'
                     '<p style="font-size:11px;color:#6a90aa;margin-top:6px;">'
-                    'Includes KPIs, fundamentals, and (optional) AI-generated trade thesis + news summary.'
+                    'Printable A4 report with KPIs, order flow footprint, tail risk & quantitative thesis.'
                     '</p></div>', unsafe_allow_html=True)
-        _use_ai = st.checkbox("Include AI thesis & news summary (uses LLM key)", value=False, key="pdf_ai")
+        _use_ai_pdf = st.checkbox("Include AI / Quantitative thesis", value=True, key="pdf_ai")
         if st.button("🖨️ Generate PDF Report", use_container_width=True, key="pdf_gen"):
             with st.spinner("Building PDF..."):
                 _ctx_pdf = dict(st.session_state.get("_stock_ctx", {}))
                 _f_data, _ = fetch_fundamentals(selected_ticker)
                 _ctx_pdf["fundamentals"] = _f_data or {}
                 _thesis_txt = ""; _news_txt = ""
-                if _use_ai:
+                if _use_ai_pdf:
                     _ctx_pdf["news"] = [x.get("title","") for x in (fetch_news(selected_ticker, selected_name) or [])[:10]]
                     _thesis_txt = xp.ai_trade_thesis(_ctx_pdf)
                     _news_txt   = xp.ai_summarize_news(_ctx_pdf["news"], selected_name)
@@ -39,8 +39,34 @@ def render_export_tab(df: pd.DataFrame, selected_name: str, selected_ticker: str
 
     with ec2:
         st.markdown('<div class="glass-card">'
+                    '<p class="glass-label">🌐 HTML TEARSHEET</p>'
+                    '<div class="glass-value" style="color:#00e87a;font-size:1.1rem;">Interactive Executive Sheet</div>'
+                    '<p style="font-size:11px;color:#6a90aa;margin-top:6px;">'
+                    'Standalone, dark-mode institutional tearsheet openable in any browser.'
+                    '</p></div>', unsafe_allow_html=True)
+        _use_ai_html = st.checkbox("Include AI thesis in HTML", value=True, key="html_ai")
+        if st.button("⚡ Generate HTML Tearsheet", use_container_width=True, key="html_gen"):
+            with st.spinner("Building HTML Tearsheet..."):
+                _ctx_html = dict(st.session_state.get("_stock_ctx", {}))
+                _f_data, _ = fetch_fundamentals(selected_ticker)
+                _ctx_html["fundamentals"] = _f_data or {}
+                _thesis_txt = ""; _news_txt = ""
+                if _use_ai_html:
+                    _ctx_html["news"] = [x.get("title","") for x in (fetch_news(selected_ticker, selected_name) or [])[:10]]
+                    _thesis_txt = xp.ai_trade_thesis(_ctx_html)
+                    _news_txt   = xp.ai_summarize_news(_ctx_html["news"], selected_name)
+                _html_str = xp.build_html_tearsheet(_ctx_html, _thesis_txt, _news_txt)
+                st.session_state["_last_html"] = _html_str
+                st.session_state["_last_html_name"] = f"{selected_name}_tearsheet.html"
+        if st.session_state.get("_last_html"):
+            st.download_button("⬇️ Download HTML Tearsheet",
+                st.session_state["_last_html"].encode("utf-8"), st.session_state["_last_html_name"],
+                "text/html", use_container_width=True, key="html_dl")
+
+    with ec3:
+        st.markdown('<div class="glass-card">'
                     '<p class="glass-label">📊 EXCEL WORKBOOK</p>'
-                    '<div class="glass-value" style="color:#00e87a;font-size:1.1rem;">Multi-sheet analytics</div>'
+                    '<div class="glass-value" style="color:#f59e0b;font-size:1.1rem;">Multi-sheet analytics</div>'
                     '<p style="font-size:11px;color:#6a90aa;margin-top:6px;">'
                     'Sheets: OHLCV + indicators, backtest trades, scanner results (if available), '
                     'trade journal, watchlist.'

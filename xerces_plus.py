@@ -588,6 +588,15 @@ def build_pdf_report(ctx: dict, thesis_text: str = "", news_summary: str = "") -
         ["ATR(14)",       f"Rs {ctx.get('atr', 0):,.2f}"],
         ["Annual Volatility", f"{ctx.get('vol', 0)*100:.1f}%"],
     ]
+    if "whale_net" in ctx:
+        kpi_rows.append(["Whale Net Flow", f"Rs {ctx.get('whale_net', 0):,.0f} ({ctx.get('whale_conviction', 50):.1f}% Buy)"])
+        kpi_rows.append(["Flow Sentiment", f"{ctx.get('flow_sentiment', 'NEUTRAL')} | {ctx.get('flow_divergence', 'NONE')}"])
+    if "cmf_20" in ctx:
+        kpi_rows.append(["Chaikin Money Flow (20)", f"{ctx.get('cmf_20', 0):.3f}"])
+    if "var_95_pct" in ctx:
+        kpi_rows.append(["95% 1D VaR", f"{ctx.get('var_95_pct', 0):.2f}% tail risk"])
+    if "cvar_95_pct" in ctx:
+        kpi_rows.append(["95% CVaR Tail Risk", f"{ctx.get('cvar_95_pct', 0):.2f}% tail loss"])
     t = Table(kpi_rows, colWidths=[5*cm, 11*cm])
     t.setStyle(TableStyle([
         ("BACKGROUND", (0,0), (0,-1), colors.HexColor("#eef6ff")),
@@ -634,6 +643,373 @@ def build_pdf_report(ctx: dict, thesis_text: str = "", news_summary: str = "") -
 
     doc.build(story)
     return buf.getvalue()
+
+# ──────────────────────────────────────────────────────────────────────────
+# 8b. INTERACTIVE HTML TEARSHEET
+# ──────────────────────────────────────────────────────────────────────────
+def build_html_tearsheet(ctx: dict, thesis_text: str = "", news_summary: str = "") -> str:
+    """Generate a responsive, dark-mode institutional executive HTML tearsheet."""
+    import html
+    name = html.escape(str(ctx.get("name") or "XERCES Asset"))
+    ticker = html.escape(str(ctx.get("ticker") or ""))
+    price = ctx.get("price", 0.0)
+    change_1d = ctx.get("change_1d", 0.0)
+    signal = str(ctx.get("signal", "HOLD")).upper()
+    strength = int(ctx.get("strength", 50))
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M IST")
+
+    sig_color = "#00e87a" if "BUY" in signal else ("#ff4d6d" if "SELL" in signal else "#f59e0b")
+    chg_color = "#00e87a" if change_1d >= 0 else "#ff4d6d"
+
+    # Whale & flow metrics
+    whale_net = ctx.get("whale_net")
+    whale_conviction = ctx.get("whale_conviction", 50.0)
+    retail_conviction = ctx.get("retail_conviction", 50.0)
+    flow_sentiment = html.escape(str(ctx.get("flow_sentiment", "NEUTRAL")))
+    flow_divergence = html.escape(str(ctx.get("flow_divergence", "NONE")))
+    cmf_20 = ctx.get("cmf_20")
+
+    # Risk metrics
+    var_95 = ctx.get("var_95_pct")
+    cvar_95 = ctx.get("cvar_95_pct")
+
+    # Fundamentals table
+    fund_html = ""
+    if ctx.get("fundamentals") and isinstance(ctx["fundamentals"], dict):
+        fund_rows = ""
+        for k, v in ctx["fundamentals"].items():
+            val_str = f"{v:.2f}" if isinstance(v, (int, float)) else str(v)
+            fund_rows += f"<tr><td>{html.escape(str(k))}</td><td>{html.escape(val_str)}</td></tr>"
+        if fund_rows:
+            fund_html = f"""
+            <div class="card">
+                <h3>Valuation &amp; Fundamentals</h3>
+                <table class="data-table">
+                    <tbody>{fund_rows}</tbody>
+                </table>
+            </div>
+            """
+
+    # Thesis HTML
+    thesis_html = ""
+    if thesis_text:
+        paras = "".join(f"<p>{html.escape(p)}</p>" for p in thesis_text.split("\n\n") if p.strip())
+        thesis_html = f"""
+        <div class="card full-width">
+            <h3>AI Quantitative Trade Thesis &amp; Strategy Memo</h3>
+            <div class="thesis-body">{paras}</div>
+        </div>
+        """
+
+    # News HTML
+    news_html = ""
+    if news_summary:
+        news_paras = "".join(f"<p>{html.escape(p)}</p>" for p in news_summary.split("\n\n") if p.strip())
+        news_html = f"""
+        <div class="card full-width">
+            <h3>Market Intelligence &amp; News Flow</h3>
+            <div class="news-body">{news_paras}</div>
+        </div>
+        """
+
+    # Whale flow card HTML
+    whale_card = ""
+    if whale_net is not None:
+        whale_net_color = "#00e87a" if whale_net >= 0 else "#ff4d6d"
+        cmf_row = f"<div class='kpi-row'><span class='label'>Chaikin Money Flow (20)</span><span class='value'>{cmf_20:.3f}</span></div>" if cmf_20 is not None else ""
+        whale_card = f"""
+        <div class="card">
+            <h3>Institutional Order Flow &amp; Whale Footprint</h3>
+            <div class="kpi-row">
+                <span class="label">Whale Net Flow</span>
+                <span class="value" style="color:{whale_net_color}">Rs {whale_net:,.0f}</span>
+            </div>
+            <div class="kpi-row">
+                <span class="label">Smart Money Conviction</span>
+                <span class="value">{whale_conviction:.1f}% Buy</span>
+            </div>
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" style="width:{max(0, min(100, whale_conviction))}%; background:#00c8ff;"></div>
+            </div>
+            <div class="kpi-row" style="margin-top:8px;">
+                <span class="label">Retail Conviction</span>
+                <span class="value">{retail_conviction:.1f}% Buy</span>
+            </div>
+            <div class="kpi-row">
+                <span class="label">Flow Sentiment</span>
+                <span class="badge" style="background:#1e293b; color:#00c8ff;">{flow_sentiment}</span>
+            </div>
+            <div class="kpi-row">
+                <span class="label">Volume Divergence</span>
+                <span class="badge" style="background:#1e293b; color:#f59e0b;">{flow_divergence}</span>
+            </div>
+            {cmf_row}
+        </div>
+        """
+
+    # Risk card HTML
+    risk_card = ""
+    if cvar_95 is not None or var_95 is not None:
+        var_row = f"<div class='kpi-row'><span class='label'>95% 1-Day VaR</span><span class='value' style='color:#ff4d6d;'>{var_95:.2f}% tail risk</span></div>" if var_95 is not None else ""
+        cvar_row = f"<div class='kpi-row'><span class='label'>95% CVaR Tail Risk</span><span class='value' style='color:#ff4d6d;'>{cvar_95:.2f}% tail loss</span></div>" if cvar_95 is not None else ""
+        risk_card = f"""
+        <div class="card">
+            <h3>Tail Risk &amp; Expected Shortfall</h3>
+            {var_row}
+            {cvar_row}
+            <div class="kpi-row">
+                <span class="label">ATR(14) Volatility Buffer</span>
+                <span class="value">Rs {ctx.get('atr', 0):,.2f}</span>
+            </div>
+            <div class="kpi-row">
+                <span class="label">Annualized Volatility</span>
+                <span class="value">{ctx.get('vol', 0)*100:.1f}%</span>
+            </div>
+        </div>
+        """
+
+    html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>XERCES Institutional Tearsheet - {name} ({ticker})</title>
+<style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{
+        background: #090d16;
+        color: #e2e8f0;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        line-height: 1.5;
+        padding: 24px;
+    }}
+    .container {{
+        max-width: 1100px;
+        margin: 0 auto;
+    }}
+    .header {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 18px;
+        margin-bottom: 24px;
+        gap: 16px;
+    }}
+    .brand {{
+        font-size: 11px;
+        letter-spacing: 2px;
+        color: #00c8ff;
+        font-weight: 700;
+        text-transform: uppercase;
+    }}
+    .title {{
+        font-size: 26px;
+        font-weight: 800;
+        color: #ffffff;
+        margin-top: 2px;
+    }}
+    .subtitle {{
+        font-size: 12px;
+        color: #64748b;
+        margin-top: 2px;
+    }}
+    .header-right {{
+        text-align: right;
+    }}
+    .price-display {{
+        font-size: 28px;
+        font-weight: 800;
+        color: #ffffff;
+    }}
+    .change-badge {{
+        font-size: 14px;
+        font-weight: 600;
+        color: {chg_color};
+        margin-left: 8px;
+    }}
+    .signal-pill {{
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 9999px;
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        background: {sig_color}22;
+        color: {sig_color};
+        border: 1px solid {sig_color}44;
+        margin-top: 6px;
+    }}
+    .grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 18px;
+        margin-bottom: 24px;
+    }}
+    .card {{
+        background: #0f172a;
+        border: 1px solid #1e293b;
+        border-radius: 10px;
+        padding: 18px;
+    }}
+    .full-width {{
+        grid-column: 1 / -1;
+    }}
+    .card h3 {{
+        font-size: 13px;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: #00c8ff;
+        margin-bottom: 14px;
+        font-weight: 700;
+        border-bottom: 1px solid #1e293b;
+        padding-bottom: 6px;
+    }}
+    .kpi-row {{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 6px 0;
+        border-bottom: 1px solid #141f33;
+        font-size: 13px;
+    }}
+    .kpi-row:last-child {{
+        border-bottom: none;
+    }}
+    .label {{
+        color: #94a3b8;
+    }}
+    .value {{
+        font-weight: 600;
+        color: #f1f5f9;
+    }}
+    .badge {{
+        padding: 2px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: 600;
+    }}
+    .progress-bar-bg {{
+        width: 100%;
+        height: 6px;
+        background: #1e293b;
+        border-radius: 3px;
+        overflow: hidden;
+        margin: 6px 0;
+    }}
+    .progress-bar-fill {{
+        height: 100%;
+        border-radius: 3px;
+    }}
+    .data-table {{
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+    }}
+    .data-table td {{
+        padding: 6px 4px;
+        border-bottom: 1px solid #141f33;
+    }}
+    .data-table td:first-child {{
+        color: #94a3b8;
+        font-weight: 500;
+    }}
+    .data-table td:last-child {{
+        text-align: right;
+        font-weight: 600;
+        color: #f1f5f9;
+    }}
+    .thesis-body p, .news-body p {{
+        font-size: 13px;
+        line-height: 1.6;
+        color: #cbd5e1;
+        margin-bottom: 10px;
+    }}
+    .thesis-body p:last-child, .news-body p:last-child {{
+        margin-bottom: 0;
+    }}
+    .footer {{
+        margin-top: 32px;
+        padding-top: 16px;
+        border-top: 1px solid #1e293b;
+        font-size: 11px;
+        color: #64748b;
+        display: flex;
+        justify-content: space-between;
+        flex-wrap: wrap;
+        gap: 8px;
+    }}
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="header">
+        <div>
+            <div class="brand">XERCES QUANT // EXECUTIVE TEARSHEET</div>
+            <div class="title">{name} ({ticker})</div>
+            <div class="subtitle">Generated on {now_str}</div>
+        </div>
+        <div class="header-right">
+            <div>
+                <span class="price-display">Rs {price:,.2f}</span>
+                <span class="change-badge">{change_1d:+.2f}%</span>
+            </div>
+            <div>
+                <span class="signal-pill">{signal} &bull; Strength {strength}/100</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="grid">
+        <div class="card">
+            <h3>Key Technical Indicators</h3>
+            <div class="kpi-row">
+                <span class="label">RSI (14)</span>
+                <span class="value">{ctx.get('rsi', 50):.1f}</span>
+            </div>
+            <div class="kpi-row">
+                <span class="label">MACD / Signal</span>
+                <span class="value">{ctx.get('macd', 0):.3f} / {ctx.get('macd_signal', 0):.3f}</span>
+            </div>
+            <div class="kpi-row">
+                <span class="label">SMA 20</span>
+                <span class="value">Rs {ctx.get('sma20', 0):,.2f}</span>
+            </div>
+            <div class="kpi-row">
+                <span class="label">SMA 50</span>
+                <span class="value">Rs {ctx.get('sma50', 0):,.2f}</span>
+            </div>
+            <div class="kpi-row">
+                <span class="label">SMA 200</span>
+                <span class="value">Rs {ctx.get('sma200', 0):,.2f}</span>
+            </div>
+            <div class="kpi-row">
+                <span class="label">52-Week High / Low</span>
+                <span class="value">Rs {ctx.get('hi52', 0):,.1f} / Rs {ctx.get('lo52', 0):,.1f}</span>
+            </div>
+        </div>
+
+        {whale_card}
+
+        {risk_card}
+
+        {fund_html}
+
+        {thesis_html}
+
+        {news_html}
+    </div>
+
+    <div class="footer">
+        <div>XERCES Quantitative Analytics Desk &bull; Confidential Institutional Research</div>
+        <div>Disclaimer: For research and analysis only. Not SEBI registered investment advice.</div>
+    </div>
+</div>
+</body>
+</html>"""
+    return html_content
 
 # ──────────────────────────────────────────────────────────────────────────
 # 9. EXCEL EXPORT
