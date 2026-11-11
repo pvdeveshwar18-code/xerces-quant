@@ -116,6 +116,14 @@ def load_broker_credentials(broker_name: str) -> dict:
             return {}
     return {}
 
+def save_notification_config(config_dict: dict):
+    """Save Telegram/Discord webhook notification settings in SQLite."""
+    save_broker_credentials("notification_webhooks", config_dict)
+
+def load_notification_config() -> dict:
+    """Load saved notification configuration from SQLite."""
+    return load_broker_credentials("notification_webhooks")
+
 def save_journal_entry(date: str, ticker: str, action: str, quantity: int, entry_price: float, exit_price: float = 0.0, notes: str = ""):
     """Save trade journal entry."""
     pnl = (exit_price - entry_price) * quantity if exit_price > 0 and action == "BUY" else (entry_price - exit_price) * quantity if exit_price > 0 else 0.0

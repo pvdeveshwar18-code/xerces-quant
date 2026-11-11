@@ -356,18 +356,51 @@ with st.sidebar:
                 from notifications.alert_dispatcher import AlertDispatcher
                 dispatcher = AlertDispatcher()
                 entry_hits = dispatcher.check_watchlist_entry_hits(_wl)
-                if entry_hits:
-                    st.success(f"🎯 {len(entry_hits)} Watchlist Entry Hits Detected!")
-                    for hit in entry_hits:
-                        st.info(f"**{hit['name']}** (`{hit['ticker']}`): Reached Entry Zone `{hit['entry_zone']}`. Target 1: `{hit['target_1']}`")
-                else:
-                    st.info("No watchlist stocks currently touching entry zones.")
+                st.session_state["wl_entry_hits"] = entry_hits
+
+        entry_hits = st.session_state.get("wl_entry_hits", [])
+        if entry_hits:
+            st.success(f"🎯 {len(entry_hits)} Watchlist Entry Hits Detected!")
+            for i, hit in enumerate(entry_hits):
+                st.markdown(
+                    f"<div class='glass-card' style='border-left:3px solid #00e87a;padding:8px 10px;margin-bottom:6px;'>"
+                    f"<b>{hit['name']}</b> ({hit['ticker']})<br>"
+                    f"<span style='font-size:11px;color:#00c8ff;'>Price: {hit['current_price']} | Entry: {hit['entry_zone']}</span><br>"
+                    f"<span style='font-size:10px;color:#8a99ad;'>Target: {hit['target_1']} | Stop: {hit['stop_loss']} ({hit['rr_ratio']})</span>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+                c_hit1, c_hit2 = st.columns(2)
+                with c_hit1:
+                    if st.button("⚡ Paper Buy", key=f"wl_paper_{i}_{hit['ticker']}"):
+                        from brokers.executor import execute_order
+                        p_res = execute_order(
+                            broker_name="Paper Simulator",
+                            symbol=hit["ticker"],
+                            transaction_type="BUY",
+                            quantity=10,
+                            price=hit["raw_current_price"],
+                            order_type="MKT"
+                        )
+                        st.success(f"✅ Paper order placed! ID: {p_res.get('order_id')}")
+                with c_hit2:
+                    if st.button("🛒 Open Desk", key=f"wl_desk_{i}_{hit['ticker']}"):
+                        st.session_state["prefill_order"] = {
+                            "ticker": hit["ticker"],
+                            "name": hit["name"],
+                            "price": hit["raw_current_price"],
+                            "action": "BUY",
+                            "quantity": 10,
+                            "source": "Watchlist Entry Hit"
+                        }
+                        st.session_state["xerces_active_tab"] = "🛒 ORDER"
+                        st.rerun()
     else:
         st.caption("Empty — add stocks from any analysis view.")
     st.markdown("---")
 
     # Alerts Sidebar
-    st.markdown("<p class='telemetry-tag' style='color:#ff6b35;font-weight:700;margin-bottom:5px;'>[ 🚨 ALERTS ]</p>", unsafe_allow_html=True)
+    st.markdown("<p class='telemetry-tag' style='color:#ff6b35;font-weight:700;margin-bottom:5px;'>[ 🚨 ALERTS & WEBHOOKS ]</p>", unsafe_allow_html=True)
     _alerts = xp.load_alerts()
     _active = [a for a in _alerts if not a.get("triggered")]
     _fired  = [a for a in _alerts if a.get("triggered")]
@@ -380,6 +413,38 @@ with st.sidebar:
         if st.button("Set Alert", use_container_width=True, key="al_add"):
             xp.add_alert(selected_ticker, selected_name, _akind, _aop, _aval)
             st.success("Alert saved."); st.rerun()
+
+    # Webhook configuration panel
+    with st.expander("📡 Webhooks (Telegram / Discord)", expanded=False):
+        from data.database import load_notification_config, save_notification_config
+        _notif_cfg = load_notification_config() or {}
+        _tg_token = st.text_input("Telegram Bot Token:", value=_notif_cfg.get("telegram_bot_token", ""), type="password", key="notif_tg_token")
+        _tg_chat  = st.text_input("Telegram Chat ID:", value=_notif_cfg.get("telegram_chat_id", ""), key="notif_tg_chat")
+        _dc_url   = st.text_input("Discord Webhook URL:", value=_notif_cfg.get("discord_webhook_url", ""), type="password", key="notif_dc_url")
+        c_wh1, c_wh2 = st.columns(2)
+        with c_wh1:
+            if st.button("💾 Save", use_container_width=True, key="save_webhooks_btn"):
+                save_notification_config({
+                    "telegram_bot_token": _tg_token.strip(),
+                    "telegram_chat_id": _tg_chat.strip(),
+                    "discord_webhook_url": _dc_url.strip()
+                })
+                st.success("Webhooks saved!")
+        with c_wh2:
+            if st.button("🧪 Test", use_container_width=True, key="test_webhooks_btn"):
+                from notifications.alert_dispatcher import AlertDispatcher
+                d = AlertDispatcher(_tg_token.strip(), _tg_chat.strip(), _dc_url.strip())
+                res = d.test_connections()
+                if res.get("telegram"):
+                    st.success("✅ Telegram OK!")
+                elif res.get("telegram") is False:
+                    st.error("❌ Telegram failed")
+                if res.get("discord"):
+                    st.success("✅ Discord OK!")
+                elif res.get("discord") is False:
+                    st.error("❌ Discord failed")
+                if not _tg_token and not _dc_url:
+                    st.info("Enter Bot Token or Webhook URL first.")
     for _a in _alerts[-6:][::-1]:
         _clr = "#00e87a" if _a.get("triggered") else "#ffcc00"
         _tag = "🔔 FIRED" if _a.get("triggered") else "⏳"
@@ -480,6 +545,26 @@ if _cvar_res:
     _stock_ctx["cvar_95_pct"] = _cvar_res.get("cvar_95_pct", 0.0)
     _stock_ctx["var_95_pct"] = _cvar_res.get("var_95_pct", 0.0)
 
+# Enrich with Institutional Multi-Factor Decision (Session-Cached)
+_dec_cache_key = f"dec__{selected_ticker}__{history_period}__{risk_reward}"
+if _dec_cache_key not in st.session_state:
+    try:
+        from decision.engine import compute_decision
+        st.session_state[_dec_cache_key] = compute_decision(
+            df=df,
+            sentiment_val=0.0,
+            risk_reward=risk_reward
+        )
+    except Exception:
+        st.session_state[_dec_cache_key] = None
+
+_dec_res = st.session_state.get(_dec_cache_key)
+if _dec_res:
+    _stock_ctx["decision_score"] = _dec_res.get("score", 50)
+    _stock_ctx["decision_reco"] = _dec_res.get("recommendation", "HOLD")
+    _stock_ctx["decision_conf"] = _dec_res.get("confidence", 50)
+    _stock_ctx["decision_reason"] = _dec_res.get("reason", "")
+
 st.session_state["_stock_ctx"] = _stock_ctx
 
 def _alert_lookup(t):
@@ -488,9 +573,31 @@ def _alert_lookup(t):
     return None
 _new_alerts = xp.evaluate_alerts(_alert_lookup)
 if _new_alerts:
+    try:
+        from notifications.alert_dispatcher import AlertDispatcher
+        _disp = AlertDispatcher()
+    except Exception:
+        _disp = None
+
     for _a in _new_alerts:
-        st.warning(f"🔔 ALERT TRIGGERED — {_a['name']}: {_a['kind'].upper()} {_a['op']} {_a['value']} "
-                   f"(current: {_a.get('last_val', 0):.2f})")
+        if _disp:
+            _disp.dispatch_price_alert(_a)
+        c_al1, c_al2 = st.columns([4, 1])
+        with c_al1:
+            st.warning(f"🔔 ALERT TRIGGERED — {_a['name']}: {_a['kind'].upper()} {_a['op']} {_a['value']} "
+                       f"(current: {_a.get('last_val', 0):.2f})")
+        with c_al2:
+            if st.button("⚡ Trade Alert", key=f"trade_alert_btn_{_a['name']}_{_a['kind']}"):
+                st.session_state["prefill_order"] = {
+                    "ticker": selected_ticker,
+                    "name": _a['name'],
+                    "price": float(_a.get('last_val', close)),
+                    "action": "BUY" if _a['op'] == ">" else "SELL",
+                    "quantity": 10,
+                    "source": f"Alert {_a['kind'].upper()} {_a['op']} {_a['value']}"
+                }
+                st.session_state["xerces_active_tab"] = "🛒 ORDER"
+                st.rerun()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # KPI SUMMARY ROW
@@ -514,6 +621,35 @@ for col, lbl, val, clr in zip(
     col.markdown(f'<div class="glass-card"><p class="glass-label">{lbl}</p>'
                  f'<div class="glass-value" style="color:{clr};font-size:1.1rem;">{val}</div></div>',
                  unsafe_allow_html=True)
+
+if _dec_res:
+    d_score = _dec_res.get("score", 50)
+    d_reco  = _dec_res.get("recommendation", "Hold")
+    d_conf  = _dec_res.get("confidence", 50)
+    d_rsn   = _dec_res.get("reason", "Mixed indicators")
+    bd      = _dec_res.get("breakdown", {})
+
+    score_clr = "#00e87a" if d_score >= 70 else "#ff3355" if d_score <= 35 else "#00c8ff"
+
+    st.markdown(f"""
+    <div class="glass-card" style="border-left:4px solid {score_clr};padding:10px 16px;margin-top:6px;margin-bottom:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+            <div>
+                <span class="glass-label" style="color:#6a90aa;">INSTITUTIONAL MULTI-FACTOR DECISION ENGINE</span>
+                <div style="font-family:'Orbitron',sans-serif;font-size:1.15rem;font-weight:700;color:{score_clr};margin-top:2px;">
+                    {d_reco} &nbsp;·&nbsp; Composite Conviction: {d_score}/100 &nbsp;·&nbsp; Model Confidence: {d_conf}%
+                </div>
+                <p style="font-size:11px;color:#8a99ad;margin:3px 0 0;">Rationale: {d_rsn}</p>
+            </div>
+            <div style="font-family:'Space Mono',monospace;font-size:11px;color:#ddeeff;display:flex;gap:12px;">
+                <span>Trend: <b>{bd.get('trend', 0)}/30</b></span>
+                <span>Momentum: <b>{bd.get('momentum', 0)}/25</b></span>
+                <span>Forecast: <b>{bd.get('forecast', 0)}/20</b></span>
+                <span>MTF: <b>{bd.get('mtf', 0)}/15</b></span>
+            </div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
 

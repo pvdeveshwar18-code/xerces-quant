@@ -92,6 +92,19 @@ def render_order_tab(selected_name: str, selected_ticker: str, close: float):
     ])
 
     with tab_exec:
+        prefill = st.session_state.get("prefill_order", {})
+        if prefill:
+            st.markdown(
+                f"""<div class="glass-card" style="border-left:4px solid #00c8ff;padding:8px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">
+                    <div>
+                        <span class="glass-label" style="color:#00c8ff;">⚡ PRE-FILLED SIGNAL ORDER</span>:
+                        <b>{prefill.get('action', 'BUY')} {prefill.get('quantity', 10)}x {prefill.get('name', selected_name)} ({prefill.get('ticker', selected_ticker)})</b>
+                        <span style="font-size:11px;color:#8a99ad;margin-left:8px;">Source: {prefill.get('source', 'Signal Bridge')}</span>
+                    </div>
+                </div>""",
+                unsafe_allow_html=True
+            )
+
         paper_mode = st.session_state.get("paper_mode", st.session_state.get("config", {}).get("PAPER_MODE", True))
         mode_badge = "🟢 PAPER TRADING (SIMULATION)" if paper_mode else "🔴 LIVE REAL BROKER EXECUTION"
         mode_color = "#00e87a" if paper_mode else "#ff3355"
@@ -105,15 +118,20 @@ def render_order_tab(selected_name: str, selected_ticker: str, close: float):
             unsafe_allow_html=True
         )
 
+        target_ticker = prefill.get("ticker", selected_ticker) if prefill else selected_ticker
+        default_side_idx = 0 if prefill.get("action", "BUY") == "BUY" else 1
+        default_qty = int(prefill.get("quantity", 10))
+        default_px = float(prefill.get("price", close if close and close > 0 else 100.0))
+
         col_e1, col_e2, col_e3, col_e4 = st.columns([1.5, 1, 1, 1])
         with col_e1:
             exec_broker = st.selectbox("Broker Account:", SUPPORTED_BROKERS, index=0, key="exec_brk_tab")
         with col_e2:
-            exec_action = st.selectbox("Order Side:", ["BUY", "SELL"], key="exec_side_tab")
+            exec_action = st.selectbox("Order Side:", ["BUY", "SELL"], index=default_side_idx, key="exec_side_tab")
         with col_e3:
             exec_product = st.selectbox("Product:", ["CNC (Delivery)", "MIS (Intraday)", "NRML (F&O)"], key="exec_prod_tab")
         with col_e4:
-            exec_quantity = st.number_input("Shares Qty:", min_value=1, value=10, step=5, key="exec_qty_tab")
+            exec_quantity = st.number_input("Shares Qty:", min_value=1, value=default_qty, step=5, key="exec_qty_tab")
 
         col_p1, col_p2, col_p3 = st.columns([1, 1, 1])
         with col_p1:
@@ -122,7 +140,7 @@ def render_order_tab(selected_name: str, selected_ticker: str, close: float):
             exec_price = st.number_input(
                 "Order Price (₹):",
                 min_value=0.01,
-                value=round(close, 2) if close and close > 0 else 100.0,
+                value=round(default_px, 2),
                 step=1.0,
                 key="exec_px_tab"
             )
@@ -130,25 +148,32 @@ def render_order_tab(selected_name: str, selected_ticker: str, close: float):
             est_val = exec_quantity * (exec_price if exec_order_type == "LIMIT" else (close or 0.0))
             st.markdown(
                 f"""<div class="glass-card" style="padding:10px 14px;margin-top:4px;">
-                    <p class="glass-label">ESTIMATED VALUE</p>
+                    <p class="glass-label">ESTIMATED VALUE ({target_ticker})</p>
                     <div style="font-family:'Orbitron',sans-serif;font-size:1.1rem;color:#00c8ff;font-weight:700;">₹{est_val:,.2f}</div>
                 </div>""",
                 unsafe_allow_html=True
             )
 
-        btn_label = f"🚀 EXECUTE {exec_action} ORDER NOW ({'PAPER' if paper_mode else 'LIVE'})"
-        if st.button(btn_label, use_container_width=True, key="exec_now_tab_btn"):
-            with st.spinner(f"Routing {exec_action} order for {selected_ticker} to {exec_broker}…"):
-                res = execute_order(
-                    broker_name=exec_broker,
-                    symbol=selected_ticker,
-                    transaction_type=exec_action,
-                    quantity=exec_quantity,
-                    price=exec_price,
-                    order_type="LMT" if exec_order_type == "LIMIT" else "MKT"
-                )
-                st.success(f"✅ {res.get('message', 'Order placed successfully')}")
-                st.info(f"Order ID: `{res.get('order_id', '-')}` | Status: `{res.get('status', 'COMPLETE')}` | Broker: `{res.get('broker', exec_broker)}`")
+        col_act1, col_act2 = st.columns([3, 1])
+        with col_act1:
+            btn_label = f"🚀 EXECUTE {exec_action} ORDER FOR {target_ticker} ({'PAPER' if paper_mode else 'LIVE'})"
+            if st.button(btn_label, use_container_width=True, key="exec_now_tab_btn"):
+                with st.spinner(f"Routing {exec_action} order for {target_ticker} to {exec_broker}…"):
+                    res = execute_order(
+                        broker_name=exec_broker,
+                        symbol=target_ticker,
+                        transaction_type=exec_action,
+                        quantity=exec_quantity,
+                        price=exec_price,
+                        order_type="LMT" if exec_order_type == "LIMIT" else "MKT"
+                    )
+                    st.success(f"✅ {res.get('message', 'Order placed successfully')}")
+                    st.info(f"Order ID: `{res.get('order_id', '-')}` | Status: `{res.get('status', 'COMPLETE')}` | Broker: `{res.get('broker', exec_broker)}`")
+                    st.session_state.pop("prefill_order", None)
+        with col_act2:
+            if prefill and st.button("✕ Reset Pre-fill", use_container_width=True, key="reset_prefill_btn"):
+                st.session_state.pop("prefill_order", None)
+                st.rerun()
 
     with tab_hist:
         render_order_history()

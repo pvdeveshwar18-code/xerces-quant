@@ -43,7 +43,7 @@ def render_ai_analyst_tab(selected_name: str, selected_ticker: str):
     if _chat_key not in st.session_state:
         st.session_state[_chat_key] = []
 
-    ai_a, ai_b, ai_c = st.columns(3)
+    ai_a, ai_b, ai_c, ai_d = st.columns(4)
     if ai_a.button("📝 Generate Trade Thesis", use_container_width=True, key="ai_thesis"):
         with st.spinner("AI writing thesis..."):
             _thesis = xp.ai_trade_thesis(_ctx, model=_model)
@@ -54,7 +54,13 @@ def render_ai_analyst_tab(selected_name: str, selected_ticker: str):
             _summ = xp.ai_summarize_news(_ctx["news"], selected_name, model=_model)
             st.session_state[_chat_key].append(("assistant", f"**📰 NEWS SUMMARY**\n\n{_summ}"))
             st.session_state["_last_news_summary"] = _summ
-    if ai_c.button("🧹 Clear Chat", use_container_width=True, key="ai_clr"):
+    if ai_c.button("🏛️ AI Investment Committee", use_container_width=True, key="ai_comm"):
+        with st.spinner("Convening 5-analyst AI Investment Committee debate..."):
+            from ai.committee import run_investment_committee
+            _comm = run_investment_committee(_ctx, model=_model)
+            st.session_state[_chat_key].append(("assistant", _comm))
+            st.session_state["_last_committee"] = _comm
+    if ai_d.button("🧹 Clear Chat", use_container_width=True, key="ai_clr"):
         st.session_state[_chat_key] = []
         st.rerun()
 
