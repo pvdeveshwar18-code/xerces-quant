@@ -24,8 +24,8 @@ def generate_exit_strategy(
     
     if df is not None and not df.empty and len(df) >= 20:
         last_row = df.iloc[-1]
-        atr = float(last_row.get('atr_14', current_price * 0.02))
-        rsi = float(last_row.get('rsi_14', 50.0))
+        atr = float(last_row.get('atr_14') or last_row.get('ATR_14') or current_price * 0.02)
+        rsi = float(last_row.get('rsi_14') or last_row.get('RSI_14') or 50.0)
     
     atr_pct = (atr / current_price) * 100 if current_price > 0 else 2.0
     

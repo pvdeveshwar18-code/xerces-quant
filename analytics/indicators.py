@@ -17,7 +17,7 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["MACD"]          = out["EMA_12"] - out["EMA_26"]
     out["MACD_Signal"]   = out["MACD"].ewm(span=9, adjust=False).mean()
     out["MACD_Hist"]     = out["MACD"] - out["MACD_Signal"]
-    out["BB_Mid"]        = c.rolling(20).mean()
+    out["BB_Mid"]        = out["SMA_20"]
     out["BB_Std"]        = c.rolling(20).std()
     out["BB_Upper"]      = out["BB_Mid"] + 2 * out["BB_Std"]
     out["BB_Lower"]      = out["BB_Mid"] - 2 * out["BB_Std"]
@@ -29,12 +29,16 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["RSI_14"] = 100 - (100 / (1 + gain / (loss + 1e-9)))
     
     if "High" in out.columns and "Low" in out.columns:
-        hi = out["High"].astype(float)
-        lo = out["Low"].astype(float)
+        hi = out["High"].astype(float).values
+        lo = out["Low"].astype(float).values
+        c_vals = c.values
+        prev_c = np.roll(c_vals, 1)
+        prev_c[0] = c_vals[0]
         hl = hi - lo
-        hc = (hi - c.shift()).abs()
-        lc = (lo - c.shift()).abs()
-        out["ATR_14"] = pd.concat([hl, hc, lc], axis=1).max(axis=1).rolling(14).mean()
+        hc = np.abs(hi - prev_c)
+        lc = np.abs(lo - prev_c)
+        tr = np.maximum(hl, np.maximum(hc, lc))
+        out["ATR_14"] = pd.Series(tr, index=out.index).rolling(14).mean()
     else:
         out["ATR_14"] = c.rolling(14).std()
         
@@ -44,16 +48,10 @@ def add_indicators(df: pd.DataFrame) -> pd.DataFrame:
     out["Stoch_D"] = out["Stoch_K"].rolling(3).mean()
     
     if "Volume" in out.columns:
-        vol = out["Volume"].astype(float)
-        obv = [0.0]
-        for i in range(1, len(out)):
-            if out["Close"].iloc[i] > out["Close"].iloc[i-1]:
-                obv.append(obv[-1] + vol.iloc[i])
-            elif out["Close"].iloc[i] < out["Close"].iloc[i-1]:
-                obv.append(obv[-1] - vol.iloc[i])
-            else:
-                obv.append(obv[-1])
-        out["OBV"] = obv
+        vol = out["Volume"].astype(float).values
+        c_diff = np.diff(c.values, prepend=c.values[0])
+        direction = np.sign(c_diff)
+        out["OBV"] = (direction * vol).cumsum()
         
     return out
 

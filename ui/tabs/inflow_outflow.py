@@ -49,8 +49,16 @@ def render_inflow_outflow_tab(
             else:
                 st.info("Intraday 5m tape unavailable; falling back to Daily Swing tape.")
 
-    # Compute Capital Flow metrics
-    flow_data = compute_capital_flow(active_df)
+    # Compute Capital Flow metrics (use cached daily flow from session state if available)
+    flow_data = None
+    if res_mode == "Daily / Swing Tape":
+        for k in st.session_state:
+            if k.startswith(f"flow__{selected_ticker}__") and st.session_state[k]:
+                flow_data = st.session_state[k]
+                break
+
+    if flow_data is None:
+        flow_data = compute_capital_flow(active_df)
     if not flow_data:
         st.error("Failed to compute capital flow analytics.")
         return

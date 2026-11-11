@@ -36,43 +36,46 @@ def compute_capital_flow(
     # Ensure required columns
     required = ["Open", "High", "Low", "Close", "Volume"]
     for col in required:
-        if col not in work_df.columns:
+        if col not in df.columns:
             raise ValueError(f"DataFrame must contain column '{col}'")
 
-    # Clean zero volume or invalid values
-    work_df["Volume"] = work_df["Volume"].fillna(0).astype(float)
-    work_df["Close"] = work_df["Close"].astype(float)
-    work_df["High"] = work_df["High"].astype(float)
-    work_df["Low"] = work_df["Low"].astype(float)
-    work_df["Open"] = work_df["Open"].astype(float)
+    n = len(df)
+
+    # Extract numpy arrays for high-performance vectorized operations
+    close = df["Close"].astype(float).values
+    high = df["High"].astype(float).values
+    low = df["Low"].astype(float).values
+    open_p = df["Open"].astype(float).values
+    vol = df["Volume"].fillna(0).astype(float).values
 
     # 1. Turnover (Total Traded Value)
-    work_df["Turnover"] = work_df["Close"] * work_df["Volume"]
+    turnover = close * vol
 
     # 2. Close Location Value (CLV) / Money Flow Multiplier: [-1.0, 1.0]
-    high_low_range = work_df["High"] - work_df["Low"]
-    high_low_range = high_low_range.replace(0, 1e-6)
-    clv = ((work_df["Close"] - work_df["Low"]) - (work_df["High"] - work_df["Close"])) / high_low_range
+    high_low_range = high - low
+    hl_safe = np.where(high_low_range == 0, 1e-6, high_low_range)
+    clv = ((close - low) - (high - close)) / hl_safe
 
     # 3. Buyer vs Seller Initiative Model
-    base_buy_ratio = (clv + 1.0) / 2.0
+    base_buy_ratio = (clv + 1.0) * 0.5
 
     # Intraday wick absorption factor: lower wick (buying off lows) vs upper wick
-    lower_wick = np.maximum(0.0, np.minimum(work_df["Open"], work_df["Close"]) - work_df["Low"])
-    upper_wick = np.maximum(0.0, work_df["High"] - np.maximum(work_df["Open"], work_df["Close"]))
-    wick_ratio = (lower_wick - upper_wick) / high_low_range
+    lower_wick = np.maximum(0.0, np.minimum(open_p, close) - low)
+    upper_wick = np.maximum(0.0, high - np.maximum(open_p, close))
+    wick_ratio = (lower_wick - upper_wick) / hl_safe
 
     # Incorporate price change momentum (Close vs Prev Close)
-    prev_close = work_df["Close"].shift(1).fillna(work_df["Open"])
-    day_pct = (work_df["Close"] - prev_close) / prev_close.replace(0, 1.0)
+    prev_close = np.roll(close, 1)
+    prev_close[0] = open_p[0]
+    prev_safe = np.where(prev_close == 0, 1.0, prev_close)
+    day_pct = (close - prev_close) / prev_safe
     mom_factor = 1.0 / (1.0 + np.exp(-20.0 * np.clip(day_pct, -0.2, 0.2)))
-    wick_factor = (wick_ratio + 1.0) / 2.0
+    wick_factor = (wick_ratio + 1.0) * 0.5
 
     # General market buy conviction
     buy_ratio_m = np.clip(0.50 * base_buy_ratio + 0.25 * wick_factor + 0.25 * mom_factor, 0.05, 0.95)
 
     # Smart Money (Whales & Institutions) accumulation behavior:
-    # Institutions accumulate on dips when CLV and lower wick rejection are high
     buy_ratio_xl = np.clip(0.65 * base_buy_ratio + 0.25 * wick_factor + 0.10 * mom_factor, 0.05, 0.95)
     buy_ratio_l  = np.clip(0.55 * base_buy_ratio + 0.25 * wick_factor + 0.20 * mom_factor, 0.05, 0.95)
 
@@ -80,17 +83,16 @@ def compute_capital_flow(
     buy_ratio_s  = np.clip(0.20 * base_buy_ratio + 0.80 * mom_factor, 0.05, 0.95)
 
     # 4. Relative Volume & Dynamic Tier Weighting
-    vol_sma = work_df["Volume"].rolling(window=window, min_periods=1).mean().replace(0, 1.0)
-    rvol = np.clip(work_df["Volume"] / vol_sma, 0.3, 4.0)
+    vol_series = pd.Series(vol, index=df.index)
+    vol_sma = vol_series.rolling(window=window, min_periods=1).mean().values
+    vol_sma_safe = np.where(vol_sma == 0, 1.0, vol_sma)
+    rvol = np.clip(vol / vol_sma_safe, 0.3, 4.0)
 
-    # Order Size Share Modeling:
-    # Extra-Large (Whales / Institutional Blocks): surges with high RVol
-    xl_share = np.clip(0.20 + 0.12 * np.log2(rvol), 0.08, 0.45)
-    # Large (HNIs / Pro Desks)
-    l_share = np.clip(0.26 + 0.04 * np.log2(rvol), 0.15, 0.35)
-    # Medium (Active Traders)
-    m_share = np.full(len(work_df), 0.26)
-    # Small (Retail): absorbs the remainder
+    # Order Size Share Modeling
+    log2_rvol = np.log2(rvol)
+    xl_share = np.clip(0.20 + 0.12 * log2_rvol, 0.08, 0.45)
+    l_share = np.clip(0.26 + 0.04 * log2_rvol, 0.15, 0.35)
+    m_share = np.full(n, 0.26)
     s_share = np.clip(1.0 - (xl_share + l_share + m_share), 0.08, 0.40)
 
     # Re-normalize to sum to 1.0
@@ -101,87 +103,105 @@ def compute_capital_flow(
     s_share /= total_share
 
     # Calculate Tier Inflows and Outflows
-    turnover = work_df["Turnover"]
-    
-    # Extra Large
-    work_df["XL_Inflow"] = turnover * xl_share * buy_ratio_xl
-    work_df["XL_Outflow"] = turnover * xl_share * (1.0 - buy_ratio_xl)
-    work_df["XL_Net"] = work_df["XL_Inflow"] - work_df["XL_Outflow"]
+    xl_inflow = turnover * xl_share * buy_ratio_xl
+    xl_outflow = turnover * xl_share * (1.0 - buy_ratio_xl)
+    xl_net = xl_inflow - xl_outflow
 
-    # Large
-    work_df["L_Inflow"] = turnover * l_share * buy_ratio_l
-    work_df["L_Outflow"] = turnover * l_share * (1.0 - buy_ratio_l)
-    work_df["L_Net"] = work_df["L_Inflow"] - work_df["L_Outflow"]
+    l_inflow = turnover * l_share * buy_ratio_l
+    l_outflow = turnover * l_share * (1.0 - buy_ratio_l)
+    l_net = l_inflow - l_outflow
 
-    # Medium
-    work_df["M_Inflow"] = turnover * m_share * buy_ratio_m
-    work_df["M_Outflow"] = turnover * m_share * (1.0 - buy_ratio_m)
-    work_df["M_Net"] = work_df["M_Inflow"] - work_df["M_Outflow"]
+    m_inflow = turnover * m_share * buy_ratio_m
+    m_outflow = turnover * m_share * (1.0 - buy_ratio_m)
+    m_net = m_inflow - m_outflow
 
-    # Small (Retail)
-    work_df["S_Inflow"] = turnover * s_share * buy_ratio_s
-    work_df["S_Outflow"] = turnover * s_share * (1.0 - buy_ratio_s)
-    work_df["S_Net"] = work_df["S_Inflow"] - work_df["S_Outflow"]
+    s_inflow = turnover * s_share * buy_ratio_s
+    s_outflow = turnover * s_share * (1.0 - buy_ratio_s)
+    s_net = s_inflow - s_outflow
 
     # Aggregate Total Inflow / Outflow
-    work_df["Total_Inflow"] = work_df["XL_Inflow"] + work_df["L_Inflow"] + work_df["M_Inflow"] + work_df["S_Inflow"]
-    work_df["Total_Outflow"] = work_df["XL_Outflow"] + work_df["L_Outflow"] + work_df["M_Outflow"] + work_df["S_Outflow"]
-    work_df["Net_Capital_Flow"] = work_df["Total_Inflow"] - work_df["Total_Outflow"]
+    tot_inflow = xl_inflow + l_inflow + m_inflow + s_inflow
+    tot_outflow = xl_outflow + l_outflow + m_outflow + s_outflow
+    net_cap_flow = tot_inflow - tot_outflow
 
     # Cumulative Flow Curves (CVD style)
-    work_df["Cum_Net_Flow"] = work_df["Net_Capital_Flow"].cumsum()
-    work_df["Cum_Smart_Money_Net"] = (work_df["XL_Net"] + work_df["L_Net"]).cumsum()
-    work_df["Cum_Retail_Net"] = work_df["S_Net"].cumsum()
+    cum_net_flow = np.cumsum(net_cap_flow)
+    cum_sm_net = np.cumsum(xl_net + l_net)
+    cum_retail_net = np.cumsum(s_net)
 
     # 5. Standard Indicators: CMF & MFI
-    # Chaikin Money Flow (CMF 20)
-    mf_volume = clv * work_df["Volume"]
-    vol_sum_20 = work_df["Volume"].rolling(window=20, min_periods=1).sum().replace(0, 1.0)
-    cmf_series = mf_volume.rolling(window=20, min_periods=1).sum() / vol_sum_20
-    work_df["CMF_20"] = cmf_series
+    mf_volume = pd.Series(clv * vol, index=df.index)
+    vol_sum_20 = vol_series.rolling(window=20, min_periods=1).sum().replace(0, 1.0)
+    cmf_series = (mf_volume.rolling(window=20, min_periods=1).sum() / vol_sum_20).values
 
-    # Money Flow Index (MFI 14)
-    typical_price = (work_df["High"] + work_df["Low"] + work_df["Close"]) / 3.0
-    raw_money_flow = typical_price * work_df["Volume"]
+    typical_price = pd.Series((high + low + close) / 3.0, index=df.index)
+    raw_money_flow = typical_price * vol_series
     tp_change = typical_price.diff(1)
-    pos_flow = raw_money_flow.where(tp_change > 0, 0.0)
-    neg_flow = raw_money_flow.where(tp_change < 0, 0.0)
-    pos_flow_sum = pos_flow.rolling(14, min_periods=1).sum()
-    neg_flow_sum = neg_flow.rolling(14, min_periods=1).sum().replace(0, 1e-6)
-    mfr = pos_flow_sum / neg_flow_sum
-    work_df["MFI_14"] = 100.0 - (100.0 / (1.0 + mfr))
+    pos_flow = raw_money_flow.where(tp_change > 0, 0.0).rolling(14, min_periods=1).sum()
+    neg_flow = raw_money_flow.where(tp_change < 0, 0.0).rolling(14, min_periods=1).sum().replace(0, 1e-6)
+    mfi_series = (100.0 - (100.0 / (1.0 + (pos_flow / neg_flow)))).values
 
-    # Helper function to summarize any slice of work_df
-    def _summarize_slice(slice_df: pd.DataFrame) -> Dict[str, Any]:
-        tot_in = float(slice_df["Total_Inflow"].sum())
-        tot_out = float(slice_df["Total_Outflow"].sum())
+    # Batch DataFrame column assignment to avoid fragmentation
+    work_df = df.copy()
+    work_df["Volume"] = vol
+    work_df["Close"] = close
+    work_df["High"] = high
+    work_df["Low"] = low
+    work_df["Open"] = open_p
+    work_df["Turnover"] = turnover
+    work_df["XL_Inflow"] = xl_inflow
+    work_df["XL_Outflow"] = xl_outflow
+    work_df["XL_Net"] = xl_net
+    work_df["L_Inflow"] = l_inflow
+    work_df["L_Outflow"] = l_outflow
+    work_df["L_Net"] = l_net
+    work_df["M_Inflow"] = m_inflow
+    work_df["M_Outflow"] = m_outflow
+    work_df["M_Net"] = m_net
+    work_df["S_Inflow"] = s_inflow
+    work_df["S_Outflow"] = s_outflow
+    work_df["S_Net"] = s_net
+    work_df["Total_Inflow"] = tot_inflow
+    work_df["Total_Outflow"] = tot_outflow
+    work_df["Net_Capital_Flow"] = net_cap_flow
+    work_df["Cum_Net_Flow"] = cum_net_flow
+    work_df["Cum_Smart_Money_Net"] = cum_sm_net
+    work_df["Cum_Retail_Net"] = cum_retail_net
+    work_df["CMF_20"] = cmf_series
+    work_df["MFI_14"] = mfi_series
+
+    # Fast numpy slicing for timeframes
+    def _summarize_arr(k: int) -> Dict[str, Any]:
+        idx = slice(-k, None) if k < n else slice(None)
+        tot_in = float(np.sum(tot_inflow[idx]))
+        tot_out = float(np.sum(tot_outflow[idx]))
         net_f = tot_in - tot_out
-        tot_turn = float(slice_df["Turnover"].sum())
-        
+        tot_turn = float(np.sum(turnover[idx]))
+
         net_pct = (net_f / tot_turn * 100.0) if tot_turn > 0 else 0.0
         in_ratio = (tot_in / tot_turn * 100.0) if tot_turn > 0 else 50.0
 
-        xl_in = float(slice_df["XL_Inflow"].sum())
-        xl_out = float(slice_df["XL_Outflow"].sum())
-        xl_net = xl_in - xl_out
+        xl_in = float(np.sum(xl_inflow[idx]))
+        xl_out = float(np.sum(xl_outflow[idx]))
+        xl_n = xl_in - xl_out
 
-        l_in = float(slice_df["L_Inflow"].sum())
-        l_out = float(slice_df["L_Outflow"].sum())
-        l_net = l_in - l_out
+        l_in = float(np.sum(l_inflow[idx]))
+        l_out = float(np.sum(l_outflow[idx]))
+        l_n = l_in - l_out
 
-        m_in = float(slice_df["M_Inflow"].sum())
-        m_out = float(slice_df["M_Outflow"].sum())
-        m_net = m_in - m_out
+        m_in = float(np.sum(m_inflow[idx]))
+        m_out = float(np.sum(m_outflow[idx]))
+        m_n = m_in - m_out
 
-        s_in = float(slice_df["S_Inflow"].sum())
-        s_out = float(slice_df["S_Outflow"].sum())
-        s_net = s_in - s_out
+        s_in = float(np.sum(s_inflow[idx]))
+        s_out = float(np.sum(s_outflow[idx]))
+        s_n = s_in - s_out
 
-        sm_net = xl_net + l_net
+        sm_net = xl_n + l_n
         sm_turnover = (xl_in + xl_out) + (l_in + l_out)
         sm_ratio = ((xl_in + l_in) / sm_turnover * 100.0) if sm_turnover > 0 else 50.0
 
-        retail_net = s_net
+        retail_net = s_n
         retail_turnover = s_in + s_out
         retail_ratio = (s_in / retail_turnover * 100.0) if retail_turnover > 0 else 50.0
 
@@ -211,14 +231,14 @@ def compute_capital_flow(
                 "tier_label": "Extra-Large Orders (Institutions / Whales)",
                 "inflow": xl_in,
                 "outflow": xl_out,
-                "net": xl_net,
+                "net": xl_n,
                 "share_pct": ((xl_in + xl_out) / tot_turn * 100.0) if tot_turn > 0 else 25.0,
             },
             "Large": {
                 "tier_label": "Large Orders (HNIs / Prop Desks)",
                 "inflow": l_in,
                 "outflow": l_out,
-                "net": l_net,
+                "net": l_n,
                 "share_pct": ((l_in + l_out) / tot_turn * 100.0) if tot_turn > 0 else 25.0,
             },
             "Medium": {
@@ -232,7 +252,7 @@ def compute_capital_flow(
                 "tier_label": "Small Orders (Retail Traders)",
                 "inflow": s_in,
                 "outflow": s_out,
-                "net": s_net,
+                "net": s_n,
                 "share_pct": ((s_in + s_out) / tot_turn * 100.0) if tot_turn > 0 else 25.0,
             },
         }
@@ -254,25 +274,25 @@ def compute_capital_flow(
         }
 
     # Generate Timeframe Summaries: 1D, 5D, 20D, 60D, All
-    timeframes = {}
-    timeframes["1D"] = _summarize_slice(work_df.iloc[-1:])
-    timeframes["5D"] = _summarize_slice(work_df.iloc[-min(5, len(work_df)):])
-    timeframes["20D"] = _summarize_slice(work_df.iloc[-min(20, len(work_df)):])
-    timeframes["60D"] = _summarize_slice(work_df.iloc[-min(60, len(work_df)):])
-    timeframes["All"] = _summarize_slice(work_df)
+    timeframes = {
+        "1D": _summarize_arr(1),
+        "5D": _summarize_arr(min(5, n)),
+        "20D": _summarize_arr(min(20, n)),
+        "60D": _summarize_arr(min(60, n)),
+        "All": _summarize_arr(n)
+    }
 
     # 1D Summary & Tiers (Backwards compatibility)
-    last_row = work_df.iloc[-1]
     summary_1d = timeframes["1D"]
-    summary_1d["cmf_20"] = float(last_row["CMF_20"])
-    summary_1d["mfi_14"] = float(last_row["MFI_14"])
+    summary_1d["cmf_20"] = float(cmf_series[-1])
+    summary_1d["mfi_14"] = float(mfi_series[-1])
     tiers_1d = summary_1d["tiers"]
 
     # 6. Divergence Detection over lookback (default 20 candles)
-    n_lookback = min(lookback_days, len(work_df) - 1)
-    sub = work_df.iloc[-n_lookback:]
-    px_chg = (sub["Close"].iloc[-1] - sub["Close"].iloc[0]) / sub["Close"].iloc[0] * 100.0
-    sm_chg = sub["Cum_Smart_Money_Net"].iloc[-1] - sub["Cum_Smart_Money_Net"].iloc[0]
+    n_lookback = min(lookback_days, n - 1)
+    sub_c = close[-n_lookback:]
+    px_chg = (sub_c[-1] - sub_c[0]) / sub_c[0] * 100.0
+    sm_chg = cum_sm_net[-1] - cum_sm_net[-n_lookback]
 
     divergence_type = "NONE"
     divergence_desc = "Price and capital flow are synchronized."
@@ -318,36 +338,40 @@ def compute_price_level_order_flow(flow_df: pd.DataFrame, num_buckets: int = 12)
     """
     Computes horizontal price-level capital distribution (Inflow, Outflow, and Net Footprint)
     across discrete price levels over the lookback window.
+    Optimized vectorized implementation avoiding repeated DataFrame slicing.
     """
     if flow_df is None or flow_df.empty:
         return pd.DataFrame()
 
-    min_p = float(flow_df["Low"].min())
-    max_p = float(flow_df["High"].max())
+    lows = flow_df["Low"].astype(float).values
+    highs = flow_df["High"].astype(float).values
+    total_inflows = flow_df["Total_Inflow"].astype(float).values
+    total_outflows = flow_df["Total_Outflow"].astype(float).values
+    xl_nets = flow_df["XL_Net"].astype(float).values
+
+    min_p = float(np.min(lows))
+    max_p = float(np.max(highs))
     if min_p >= max_p:
         max_p = min_p * 1.05
 
     bins = np.linspace(min_p, max_p, num_buckets + 1)
+    spans = np.maximum(highs - lows, 1e-4)
     bucket_data = []
 
     for i in range(num_buckets):
         p_low = bins[i]
         p_high = bins[i + 1]
-        p_mid = (p_low + p_high) / 2.0
+        p_mid = (p_low + p_high) * 0.5
 
         # Find rows whose high/low overlaps with this price bin
-        mask = (flow_df["Low"] <= p_high) & (flow_df["High"] >= p_low)
-        subset = flow_df[mask]
+        mask = (lows <= p_high) & (highs >= p_low)
+        if np.any(mask):
+            overlap = np.minimum(highs[mask], p_high) - np.maximum(lows[mask], p_low)
+            weight = np.clip(overlap / spans[mask], 0.05, 1.0)
 
-        if not subset.empty:
-            # Weight by price overlap factor
-            overlap = np.minimum(subset["High"], p_high) - np.maximum(subset["Low"], p_low)
-            span = np.maximum(subset["High"] - subset["Low"], 1e-4)
-            weight = np.clip(overlap / span, 0.05, 1.0)
-
-            bin_inflow = float((subset["Total_Inflow"] * weight).sum())
-            bin_outflow = float((subset["Total_Outflow"] * weight).sum())
-            bin_xl_net = float((subset["XL_Net"] * weight).sum())
+            bin_inflow = float(np.sum(total_inflows[mask] * weight))
+            bin_outflow = float(np.sum(total_outflows[mask] * weight))
+            bin_xl_net = float(np.sum(xl_nets[mask] * weight))
         else:
             bin_inflow = 0.0
             bin_outflow = 0.0

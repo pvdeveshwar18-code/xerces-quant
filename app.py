@@ -445,31 +445,40 @@ _stock_ctx = {
     "hi52": hi52, "lo52": lo52,
 }
 
-# Enrich with Capital Flow & Institutional Footprint
-try:
-    from analytics.capital_flow import compute_capital_flow
-    _flow_data = compute_capital_flow(df)
-    if _flow_data:
-        _f_sum = _flow_data.get("summary", {})
-        _f_div = _flow_data.get("divergence", {})
-        _stock_ctx["flow_sentiment"] = _f_sum.get("sentiment", "NEUTRAL")
-        _stock_ctx["net_capital_flow"] = _f_sum.get("net_capital_flow", 0.0)
-        _stock_ctx["whale_net"] = _f_sum.get("smart_money_net", 0.0)
-        _stock_ctx["whale_conviction"] = _f_sum.get("smart_money_ratio", 50.0)
-        _stock_ctx["retail_conviction"] = _f_sum.get("retail_ratio", 50.0)
-        _stock_ctx["flow_divergence"] = _f_div.get("type", "NONE")
-        _stock_ctx["cmf_20"] = _f_sum.get("cmf_20", 0.0)
-except Exception:
-    pass
+# Enrich with Capital Flow & Institutional Footprint (Session-Cached)
+_flow_cache_key = f"flow__{selected_ticker}__{history_period}"
+if _flow_cache_key not in st.session_state:
+    try:
+        from analytics.capital_flow import compute_capital_flow
+        st.session_state[_flow_cache_key] = compute_capital_flow(df)
+    except Exception:
+        st.session_state[_flow_cache_key] = None
 
-# Enrich with Tail Risk & Expected Shortfall
-try:
-    from analytics.risk_models import compute_cvar
-    _cvar_res = compute_cvar(df, confidence_level=0.95, portfolio_value=allocated_capital)
+_flow_data = st.session_state.get(_flow_cache_key)
+if _flow_data:
+    _f_sum = _flow_data.get("summary", {})
+    _f_div = _flow_data.get("divergence", {})
+    _stock_ctx["flow_sentiment"] = _f_sum.get("sentiment", "NEUTRAL")
+    _stock_ctx["net_capital_flow"] = _f_sum.get("net_capital_flow", 0.0)
+    _stock_ctx["whale_net"] = _f_sum.get("smart_money_net", 0.0)
+    _stock_ctx["whale_conviction"] = _f_sum.get("smart_money_ratio", 50.0)
+    _stock_ctx["retail_conviction"] = _f_sum.get("retail_ratio", 50.0)
+    _stock_ctx["flow_divergence"] = _f_div.get("type", "NONE")
+    _stock_ctx["cmf_20"] = _f_sum.get("cmf_20", 0.0)
+
+# Enrich with Tail Risk & Expected Shortfall (Session-Cached)
+_cvar_cache_key = f"cvar__{selected_ticker}__{history_period}__{allocated_capital}"
+if _cvar_cache_key not in st.session_state:
+    try:
+        from analytics.risk_models import compute_cvar
+        st.session_state[_cvar_cache_key] = compute_cvar(df, confidence_level=0.95, portfolio_value=allocated_capital)
+    except Exception:
+        st.session_state[_cvar_cache_key] = None
+
+_cvar_res = st.session_state.get(_cvar_cache_key)
+if _cvar_res:
     _stock_ctx["cvar_95_pct"] = _cvar_res.get("cvar_95_pct", 0.0)
     _stock_ctx["var_95_pct"] = _cvar_res.get("var_95_pct", 0.0)
-except Exception:
-    pass
 
 st.session_state["_stock_ctx"] = _stock_ctx
 
@@ -513,7 +522,7 @@ st.markdown("<br>", unsafe_allow_html=True)
 # ══════════════════════════════════════════════════════════════════════════════
 TAB_OPTIONS = [
     "📊 CHART", "🔮 FORECAST", "📈 BACKTEST", "📡 SCANNER",
-    "🛡️ RISK", "🛒 ORDER", "💼 PORTFOLIO", "📊 FII/DII", "🌊 INFLOW/OUTFLOW", "🎯 OPTIONS", "📋 FUNDAMENTALS", "📰 NEWS",
+    "🛡️ RISK", "🛒 ORDER", "💼 PORTFOLIO", "🌐 MACRO", "📊 FII/DII", "🌊 INFLOW/OUTFLOW", "🎯 OPTIONS", "📋 FUNDAMENTALS", "📰 NEWS",
     "🔥 HEATMAP", "🔄 COMPARE", "🤖 AI ANALYST", "📓 JOURNAL", "📄 EXPORT",
     "❓ MANUAL",
 ]
@@ -573,6 +582,13 @@ elif active_tab == "🛒 ORDER":
 
 elif active_tab == "💼 PORTFOLIO":
     render_portfolio_tab(allocated_capital=allocated_capital)
+
+elif active_tab == "🌐 MACRO":
+    from ui.tabs.macro import render_macro_tab
+    _idx_cache_key = f"idx_data__{market_mode}"
+    if _idx_cache_key not in st.session_state:
+        st.session_state[_idx_cache_key] = load_indices(market_mode=market_mode)
+    render_macro_tab(st.session_state[_idx_cache_key])
 
 elif active_tab == "📊 FII/DII":
     render_fii_dii_tab()
